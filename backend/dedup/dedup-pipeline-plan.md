@@ -1,0 +1,42 @@
+# PropDeDupe — Dedup Pipeline: Plan, Testing & Iteration Log
+
+*Living document. Filled in stage by stage as the pipeline is designed, built, and tested — not written upfront and then coded to match.*
+
+---
+
+## 1. Purpose & scope
+
+**Why this doc exists:** the dedup engine is the technical core of PropDeDupe and the part most worth a reviewer's attention. This doc is where the *reasoning* behind it lives — not just the code, but why each signal was chosen, why weights were set the way they were, how it was validated, and what broke along the way. The code shows *what* was built; this doc shows *how it was decided*.
+
+**What we're trying to achieve:** given two independently-scraped sources (BuyRentKenya, Property24) plus intra-source duplication on P24 itself, reliably identify which listings represent the *same physical property*, without ever rehosting images or relying on a single field as a hard veto (per standing rule #5). Output should sort every compared pair into one of three tiers: **auto-merge**, **review queue**, or **distinct**.
+
+**Phase A scope (this doc, for now):** a hand-reasoned, weighted heuristic scorer — no ML. Phase B (a learned model compared against this baseline) is out of scope until Phase A produces verified labels; see Section 6.
+
+**What "done" looks like for Phase A:**
+- Pipeline runs across the real stored dataset (BRK ~1,291 + P24 listings scraped so far), not just a toy sample.
+- Every currently known duplicate cluster (documented in the project instructions' Scraping Recon sections) is caught at **auto-merge** or **review**, never scored as distinct.
+- The review queue is a reasonably small fraction of total compared pairs — not thousands of pairs needing a human look, or the tier isn't doing its job.
+- Each signal (image, geo, price, beds/baths, suburb adjacency, text) has documented reasoning for *why* it's weighted the way it is — not arbitrary numbers.
+- A hand-verified sample of the review queue exists, so we have at least some pairs we're confident are correctly labeled (used later in Section 6 if a model is built).
+
+**A physical constraint worth naming now, before signal design:** comparing every listing against every other listing is **O(n²)** — with ~13,000 total listings once P24 is fully scraped, that's on the order of 80+ million pairs. Computing five or six signals (some involving network calls, like lazy-fetched geo) for every one of those pairs isn't feasible on a laptop, or arguably ever, without a **candidate-generation ("blocking") step first** — some cheap, rough filter that narrows down which pairs are even worth scoring in detail, before the expensive per-pair signal computation runs. This will shape Section 2/3 directly: the pipeline isn't just "score every pair," it's "cheaply shortlist candidates, then score only those."
+
+---
+
+## 2. Signal definitions
+*(to be filled in as each signal is built and reasoned through)*
+
+## 3. Weighting & tiers
+*(to be filled in once signals exist and can be reasoned about together)*
+
+## 4. Baseline validation
+*(to be filled in once there's a scorer to validate)*
+
+## 5. Findings & iteration log
+*(running log, updated as we go)*
+
+### 5a. Errors & edge cases
+*(running list, updated as we go)*
+
+## 6. Phase B: model comparison (future, conditional)
+*(trigger criteria and scope to be defined once Phase A has verified labels)*
