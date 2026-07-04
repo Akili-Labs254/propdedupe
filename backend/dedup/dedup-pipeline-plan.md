@@ -21,6 +21,12 @@
 
 **A physical constraint worth naming now, before signal design:** comparing every listing against every other listing is **O(n²)** — with ~13,000 total listings once P24 is fully scraped, that's on the order of 80+ million pairs. Computing five or six signals (some involving network calls, like lazy-fetched geo) for every one of those pairs isn't feasible on a laptop, or arguably ever, without a **candidate-generation ("blocking") step first** — some cheap, rough filter that narrows down which pairs are even worth scoring in detail, before the expensive per-pair signal computation runs. This will shape Section 2/3 directly: the pipeline isn't just "score every pair," it's "cheaply shortlist candidates, then score only those."
 
+**A second constraint, discovered by comparing scraped volumes: P24 (~12,000+) vastly outnumbers BRK (~1,291).** This means blocking isn't really one problem, it's two differently-shaped ones:
+- **Intra-P24** (same house re-listed multiple times on one site): the dominant case by volume, given how many more listings P24 has. Same-source formatting means exact image URL match is available as a strong, cheap blocking signal here (confirmed working intra-site per recon).
+- **Cross-source (P24 ↔ BRK):** lower volume, different formatting between sources, no exact image URL match available (different CDNs) — only perceptual hash, which is more expensive to compute and compare at scale.
+
+Section 2/3 should design blocking and possibly even weighting separately for these two cases rather than assuming one strategy fits both.
+
 ---
 
 ## 2. Signal definitions
