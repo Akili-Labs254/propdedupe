@@ -68,9 +68,13 @@ class Property24Scraper(BaseScraper):
                 continue
             value = value_tag.get_text(strip=True)
             if label == "Bedrooms" and value.replace(".", "").isdigit():
-                bedrooms = int(value)
+                parsed = float(value)
+                if parsed == int(parsed) and parsed <= 20:
+                    bedrooms = int(parsed)
             elif label == "Bathrooms" and value.replace(".", "").isdigit():
-                baths = float(value)
+                parsed = float(value)
+                if parsed <= 20:  # sanity ceiling — real listings never come close to this
+                    baths = parsed
 
         size_tag = tile.select_one("span.p24_size span")
         size_sqm = None

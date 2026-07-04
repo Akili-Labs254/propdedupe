@@ -1,12 +1,11 @@
 from datetime import datetime, timezone
 from backend.db.client import get_client
-from backend.scraper.base import ScrapedListing
 
 def save_listings(listings: list, source_id: int) -> None:
     db = get_client()
-
+    rows = []
     for listing in listings:
-        row = {
+        rows.append({
             "source_id": source_id,
             "source_listing_id": listing.source_listing_id,
             "url": listing.url,
@@ -19,5 +18,6 @@ def save_listings(listings: list, source_id: int) -> None:
             "price_currency": "KES",
             "last_seen": datetime.now(timezone.utc).isoformat(),
             "raw_json": listing.raw,
-        }
-        db.table("listings").upsert(row, on_conflict="source_id,source_listing_id").execute()
+        })
+    if rows:
+        db.table("listings").upsert(rows, on_conflict="source_id,source_listing_id").execute()
