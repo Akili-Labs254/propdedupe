@@ -1,0 +1,23 @@
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# ── Virtual environments ──
+.venv/
+venv/
+env/
+
+# ── Secrets & local config ──
+.env
+
+# ── Scraped data & local scratch (keep the folder, ignore its contents) ──
+data/*
+!data/.gitkeep
+
+# ── Editor / OS ──
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
