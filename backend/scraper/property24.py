@@ -53,6 +53,9 @@ class Property24Scraper(BaseScraper):
 
         location_tag = tile.select_one("span.p24_location")
         location = location_tag.get_text(strip=True) if location_tag else None
+
+        address_tag = tile.select_one("span.p24_address")
+        address = address_tag.get_text(strip=True) if address_tag else None
         
         url_tag = tile.select_one("a")
         url = self.base_url + url_tag["href"] if url_tag and url_tag.get("href") else None

@@ -33,6 +33,7 @@ class ScrapedListing:
     raw: dict[str, Any] = field(default_factory=dict)
     baths: Optional[float] = None
     size_sqm: Optional[float] = None
+    address: Optional[str] = None
 
 
 class BaseScraper:

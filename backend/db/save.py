@@ -17,6 +17,7 @@ def save_listings(listings: list, source_id: int) -> None:
             "size_sqm": listing.size_sqm,
             "price_currency": "KES",
             "last_seen": datetime.now(timezone.utc).isoformat(),
+            "image_url": listing.image_urls[0] if listing.image_urls else None,
             "raw_json": listing.raw,
         })
     if rows:
