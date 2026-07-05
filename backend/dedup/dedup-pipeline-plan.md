@@ -42,7 +42,20 @@ Section 2/3 should design blocking and possibly even weighting separately for th
 *(running log, updated as we go)*
 
 ### 5a. Errors & edge cases
-*(running list, updated as we go)*
+
+**Finding 1 — `GROUP BY image_url` alone massively over-clusters (developments defeat it).**
+First run of the Stage 1 query on 12,321 real P24 listings returned clusters far larger than expected: top clusters of **74, 65, 61, 61, 45, 38...** listings sharing one exact image URL. Hand-found recon examples were clusters of 2–3, so these large clusters are not 74 re-listings of one house.
+
+Manual investigation (opening the actual listings) revealed the cause: **standardized developments.** A development like "Eden Villas" or "Savannah Park" contains many identical units (e.g. "four courts of twelve homes" = 48 units, or "nine luxury homes"). Every unit of the same type shares the same marketing photo, the same price, and the same beds/baths/sqm **by design** — because they are genuinely identical floor plans. So image match + identical price + identical beds/baths does NOT prove duplication here; a development defeats all of those signals simultaneously.
+
+This directly confirms standing rule #6 ("image match is not auto-conclusive: developments reuse renders") — and extends it: image match is not conclusive even when *combined* with price/beds/baths, because a development holds all of those constant across many distinct real units.
+
+**Finding 2 — the real bloat is intra-type re-listing, and the fields we already store are enough to collapse it.**
+Refined the mental model with real examples: within a development, the distinct *products* are type variants (A, B, C) which genuinely differ in beds/baths/sqm/price. But agencies post every *instance* of a type as its own listing — A1, A2, ... A10 — all identical on every field a buyer can see. From a buyer's search perspective these are indistinguishable bloat; one listing for "Type A in Eden Villas" is all that's useful.
+
+Key consequence: **we do not need address parsing or unit-count regex to collapse this.** The fields already stored — `image_url` + `bedrooms` + `baths` + `size_sqm` + `price` — already distinguish type A from B/C (they differ on beds/baths/sqm) while collapsing A1–A10 (identical on all). Grouping on those existing fields does the work. (An earlier idea to regex the stated unit count out of the description, or to lean on the `address` column as the primary differentiator, was considered and dropped as over-engineering — the stored numeric fields are sufficient and simpler.)
+
+**Honest caveat on Finding 2:** this grouping cannot by itself distinguish "10 real identical units in a development" from "1 house spam-relisted 10 times" — both collapse into one group. But **for the aggregator's purpose this distinction may not matter**: either way the buyer wants to see the product once (optionally with a "N units available" note), so collapsing serves the buyer identically. The distinction only matters for counting true housing inventory, which is not the product goal. `address` was still added to the schema (cheap now, useful later for precise geocoding / Phase 2), but it is a nice-to-have detail, not load-bearing for Stage 1 grouping.
 
 ## 6. Phase B: model comparison (future, conditional)
 *(trigger criteria and scope to be defined once Phase A has verified labels)*
