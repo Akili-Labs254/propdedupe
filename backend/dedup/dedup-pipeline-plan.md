@@ -38,6 +38,15 @@ Section 2/3 should design blocking and possibly even weighting separately for th
 ## 4. Baseline validation
 *(to be filled in once there's a scorer to validate)*
 
+**First quantified Stage 1 result (12,321 P24 listings).**
+Grouping key `image_url + bedrooms + baths + size_sqm + price` (no location): **4,427 of 12,321 listings collapse as redundant (~36% bloat)** → ~7,894 distinct products. This is the first hard dedup number, defensible for README/interview ("P24's Nairobi house listings are ~36% redundant; PropDeDupe collapses them to ~7,900 distinct products").
+
+**Validation finding — location must NOT be in the grouping key.** Adding `location` to the key *reduced* collapse from 4,427 to 4,266 — meaning ~161 genuine duplicates got split apart because the same physical house is listed under multiple suburbs (Westlands / Loresho / Mountain View). This is direct empirical confirmation of standing rule #8 ("location is a dedup score, never a blocking key"). The correct number is the location-free 4,427.
+
+**Caveat on the key — it's effectively 4 fields, not 5.** `size_sqm` is `null` for nearly all P24 result-page tiles (the site rarely exposes floor size on the listing card). So the distinguishing work is really done by `image_url + bedrooms + baths + price`; sqm contributes only on the rare rows where it's populated. Not a bug, but worth knowing the key is thinner in practice than on paper.
+
+**Top clusters are developments, and collapsing them is correct behaviour.** The largest cluster (74 listings: Katani, 3bed/4bath, KSh 10.5M) is the Eden Villas / Savannah Park development. Per Finding 2 above, the grouping can't distinguish "74 real identical units" from "1 house relisted 74 times" — but for the aggregator both should show once, so a 74→1 collapse is intended, not an error.
+
 ## 5. Findings & iteration log
 *(running log, updated as we go)*
 
@@ -56,6 +65,10 @@ Refined the mental model with real examples: within a development, the distinct 
 Key consequence: **we do not need address parsing or unit-count regex to collapse this.** The fields already stored — `image_url` + `bedrooms` + `baths` + `size_sqm` + `price` — already distinguish type A from B/C (they differ on beds/baths/sqm) while collapsing A1–A10 (identical on all). Grouping on those existing fields does the work. (An earlier idea to regex the stated unit count out of the description, or to lean on the `address` column as the primary differentiator, was considered and dropped as over-engineering — the stored numeric fields are sufficient and simpler.)
 
 **Honest caveat on Finding 2:** this grouping cannot by itself distinguish "10 real identical units in a development" from "1 house spam-relisted 10 times" — both collapse into one group. But **for the aggregator's purpose this distinction may not matter**: either way the buyer wants to see the product once (optionally with a "N units available" note), so collapsing serves the buyer identically. The distinction only matters for counting true housing inventory, which is not the product goal. `address` was still added to the schema (cheap now, useful later for precise geocoding / Phase 2), but it is a nice-to-have detail, not load-bearing for Stage 1 grouping.
+
+**Finding 3 — `cluster_key` computed in Python must match SQL's `md5()` byte-for-byte, and float→string casting is the trap.** `cluster_key` (an `md5` hash of `image_url|bedrooms|baths|size_sqm|price`) was first backfilled via SQL, then a Python helper (`compute_cluster_key()` in `save.py`) was added so new scrapes compute it at save time. First attempt produced a key that did **not** match any existing row (count = 0), despite using the identical field values. Cause: Postgres's `numeric(x,y)::text` cast always renders the column's *declared decimal scale* (e.g. `numeric(3,1)` → `"4.0"`, `numeric(10,2)` → `"10500000.00"`), but Python's plain `str()` on a float does not know that scale (`str(4.0)` → `"4.0"` is fine, but inconsistent rounding/trailing-zero behaviour across values caused mismatches). Fixed by formatting Python's numeric fields with explicit decimal places matching each column's scale (`f"{baths:.1f}"`, `f"{price:.2f}"`, `f"{size_sqm:.2f}"`) rather than relying on `str()`. Confirmed fixed when a freshly-scraped listing's Python-computed key matched an existing DB row (count ≥ 1).
+
+**Standing rule this creates:** the Python and SQL key formulas must be kept byte-for-byte identical (field order, separator, decimal formatting, null-handling) — any future change to one must be mirrored in the other, or newly-scraped listings will silently stop matching their own historical duplicates.
 
 ## 6. Phase B: model comparison (future, conditional)
 *(trigger criteria and scope to be defined once Phase A has verified labels)*
