@@ -19,7 +19,7 @@ def get_distinct_image_urls(db):
         result = (
             db.table("listings")
             .select("image_url")
-            .eq("source_id", 2)
+            .eq("source_id", 1)
             .not_.is_("image_url", "null")
             .order("id")
             .range(start, start + batch_size - 1)
