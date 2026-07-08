@@ -85,12 +85,11 @@ Lavington ↔ Kilimani, Westlands ↔ Loresho ↔ Mountain View, Karen ↔ Lang'
 | Review      | 0.30 – 0.50 | Probable match, needs human verification |
 | Distinct    | > 0.50      | Different properties |
 
-### Validation against known pairs
-- **5-bed Kileleshwa KSh 70M** (dist 6, all fields match): score 0.21 → auto-merge ✓
-- **4-bed Loresho KSh 75M** (dist 6, all fields match): score 0.21 → auto-merge ✓
-- **6-bed Gigiri KSh 150M** (dist 6, all fields match): score 0.21 → auto-merge ✓
-- **Kiambu Road false positive** (dist 8, KSh 55M vs 60M, different houses): score 0.39 → review ✓
-- Thresholds will be adjusted once the scorer runs across all candidates and results are spot-checked.
+### Validation against actual scorer run (58 candidate pairs)
+- **10 auto-merge:** all have matching price + beds + location; 8 with identical baths, 2 with 1-bath difference (scraping inconsistency). Includes all 3 manually verified distance-6 pairs.
+- **34 review:** mix of probable matches (distance-10, all fields match except image borderline) and ambiguous cases (1-bed difference, or non-adjacent suburbs). Manual spot-check needed.
+- **14 distinct:** all show multiple disagreeing signals (price gap + bed mismatch + different suburb). Correctly rejected.
+- Confirmed false positive (BRK 801 ↔ P24 1232, Kiambu Road) scored 0.487 → review, not auto-merge ✓
 
 ---
 

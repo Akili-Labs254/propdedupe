@@ -16,7 +16,7 @@ WEIGHTS = {
 }
 
 # --- Tier thresholds (dissimilarity: lower = more similar) ---
-TIER_AUTO_MERGE = 0.32
+TIER_AUTO_MERGE = 0.36
 TIER_REVIEW = 0.50
 # Above TIER_REVIEW = distinct
 
