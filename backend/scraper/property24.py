@@ -97,7 +97,8 @@ class Property24Scraper(BaseScraper):
             bedrooms=bedrooms,
             baths=baths,
             raw=str(tile),
-            size_sqm=size_sqm
+            size_sqm=size_sqm,
+            address=address
         )
     
     def fetch_all(self, base_url: str, max_pages: int = 579):

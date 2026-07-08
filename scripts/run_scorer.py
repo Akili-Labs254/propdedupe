@@ -8,8 +8,6 @@ from backend.dedup.scorer import score_pair
 from scripts.cross_source_match import (
     fetch_distinct_hashes,
     find_cross_matches,
-    hex_to_int,
-    hamming_distance,
 )
 
 

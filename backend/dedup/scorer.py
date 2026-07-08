@@ -8,11 +8,11 @@ from typing import Optional, Dict, Tuple
 
 # --- Weights (must sum to 1.0) ---
 WEIGHTS = {
-    "phash": 0.35,
+    "image": 0.30,
     "price": 0.25,
     "bedrooms": 0.20,
     "baths": 0.10,
-    "location": 0.10,
+    "location": 0.15,
 }
 
 # --- Tier thresholds (dissimilarity: lower = more similar) ---
@@ -33,6 +33,9 @@ ADJACENCY_GROUPS = [
     {"kileleshwa", "riverside"},
     {"south c", "mombasa rd"},
     {"kitengela road", "langata", "lang'ata"},
+    {"nyari", "runda", "gigiri"},
+    {"kyuna", "kiambu road", "runda"},
+    {"off loresho ridge road", "loresho"},
 ]
 
 # Build a lookup: suburb -> set of all adjacent suburbs (including itself)
@@ -42,9 +45,9 @@ for group in ADJACENCY_GROUPS:
         _ADJACENCY_MAP.setdefault(suburb, set()).update(group)
 
 
-def _score_phash(distance: int) -> float:
-    """Scale Hamming distance 0-10 to 0.0-1.0."""
-    return min(distance, 10) / 10.0
+def _score_image(distance: int) -> float:
+    """Scale triple-hash min distance 0-8 to 0.0-1.0."""
+    return min(distance, 8) / 8.0
 
 
 def _score_price(a: Optional[float], b: Optional[float]) -> float:
@@ -110,7 +113,7 @@ def score_pair(
       (total_score, tier, {signal: individual_score})
     """
     signals = {
-        "phash": _score_phash(phash_distance),
+        "image": _score_image(phash_distance),
         "price": _score_price(price_a, price_b),
         "bedrooms": _score_bedrooms(beds_a, beds_b),
         "baths": _score_baths(baths_a, baths_b),
