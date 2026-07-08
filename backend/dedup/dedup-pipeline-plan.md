@@ -22,12 +22,16 @@
 **A physical constraint worth naming now, before signal design:** comparing every listing against every other listing is **O(n²)** — with ~13,000 total listings once P24 is fully scraped, that's on the order of 80+ million pairs. Computing five or six signals (some involving network calls, like lazy-fetched geo) for every one of those pairs isn't feasible on a laptop, or arguably ever, without a **candidate-generation ("blocking") step first** — some cheap, rough filter that narrows down which pairs are even worth scoring in detail, before the expensive per-pair signal computation runs. This will shape Section 2/3 directly: the pipeline isn't just "score every pair," it's "cheaply shortlist candidates, then score only those."
 
 **A second constraint, discovered by comparing scraped volumes: P24 (~12,000+) vastly outnumbers BRK (~1,291).** This means blocking isn't really one problem, it's two differently-shaped ones:
-- **Intra-P24** (same house re-listed multiple times on one site): the dominant case by volume, given how many more listings P24 has. Same-source formatting means exact image URL match is available as a strong, cheap blocking signal here (confirmed working intra-site per recon).
-- **Cross-source (P24 ↔ BRK):** lower volume, different formatting between sources, no exact image URL match available (different CDNs) — only perceptual hash, which is more expensive to compute and compare at scale.
+- **Intra-P24** (same house re-listed multiple times on one site): the dominant case by volume, given how many more listings P24 has. Same-source formatting means exact image URL match is available as a strong, cheap blocking signal here (confirmed working intra-site per recon). Uses `cluster_key` exact match — no perceptual hashing needed.
+- **Cross-source (P24 ↔ BRK):** lower volume, different formatting between sources, no exact image URL match available (different CDNs) — only perceptual hash comparison works here.
 
-Section 2/3 should design blocking and possibly even weighting separately for these two cases rather than assuming one strategy fits both.
+### Blocking step (resolved)
 
-**Blocking step (resolved):** Cross-source blocking uses perceptual hash Hamming distance ≤ 10 as the candidate filter. With 1,124 distinct BRK hashes × 6,256 distinct P24 hashes = ~7M comparisons, brute-force is feasible (pure integer XOR + popcount, no network calls, completes in minutes). This produced 58 candidate pairs that then need scoring. Intra-P24 blocking uses `cluster_key` exact match (already complete — see Stage 1 results in Section 4).
+**Intra-P24:** `cluster_key` exact match (md5 of `image_url|bedrooms|baths|size_sqm|price`). Already complete — collapses 36% of P24 listings (see Section 4).
+
+**Cross-source:** triple-hash blocking using `min(phash, ahash, whash)` Hamming distance with **2-of-3 agreement** rule. Each BRK hash triple is compared against each P24 hash triple; a pair passes blocking only if at least 2 of the 3 hash algorithms score at or below threshold 8. With ~1,127 distinct BRK hash triples × ~6,256 distinct P24 hash triples = ~7M comparisons, brute-force is feasible (pure integer XOR + popcount, no network calls, completes in minutes).
+
+The 2-of-3 rule was adopted after initial `min()` alone produced too many false positives — a single hash algorithm can fluke a low distance on structurally similar but different houses. Requiring 2 algorithms to agree filters this noise.
 
 ---
 
@@ -35,10 +39,11 @@ Section 2/3 should design blocking and possibly even weighting separately for th
 
 All signals output a **dissimilarity score** on a 0–1 scale (0 = perfect match, 1 = completely different). Null handling is per-signal — missing data is never penalised as a mismatch.
 
-### 2a. Image pHash distance
-Input: Hamming distance between two 64-bit perceptual hashes (0–10 range for candidates that passed blocking).
-Formula: `distance / 10` (linear scaling to 0–1).
-Null handling: N/A — candidates can't reach the scorer without a pHash.
+### 2a. Image distance (triple-hash)
+Input: minimum Hamming distance across phash, ahash, and whash for a candidate pair that passed blocking.
+Formula: `min_distance / 8` (linear scaling to 0–1, where 8 = blocking threshold).
+Why three hashes: watermarks (P24 "property24" corner stamp, agency stamps like "Geoscape Global", "Afrique Properties Limited") inflate any single hash's distance by 4–6 bits. Different watermark styles trip different algorithms — phash handles some better, whash/ahash handle others. Taking the minimum across three algorithms reliably scores ≤ 7 for confirmed matches and ≥ 10 for confirmed false positives (see Finding 7).
+Null handling: N/A — candidates can't reach the scorer without all three hashes.
 
 ### 2b. Price distance
 Input: two listing prices.
@@ -62,8 +67,10 @@ Three buckets: same suburb (case-insensitive) → 0.0; adjacent suburbs (per adj
 Why not 1.0 for non-adjacent: same house has been observed listed under 3 different suburbs (Westlands/Loresho/Mountain View), so even non-adjacent doesn't guarantee different properties — just less likely.
 Null handling: either null → 0.3 (mild uncertainty, same as adjacent).
 
-**Suburb adjacency map (Nairobi, initial):**
-Lavington ↔ Kilimani, Westlands ↔ Loresho ↔ Mountain View, Karen ↔ Lang'ata, Runda ↔ Gigiri, Garden Estate ↔ Thome, Kileleshwa ↔ Riverside. Expanded as real data reveals more overlaps.
+**Suburb adjacency map — current state and known gaps:**
+Current map covers: Lavington ↔ Kilimani, Westlands ↔ Loresho ↔ Mountain View, Karen ↔ Lang'ata ↔ Hardy ↔ Karen Hardy ↔ Miotoni Road ↔ Kerarapon Road ↔ KCB Leadership, Runda ↔ Gigiri ↔ Kiambu Road ↔ Nyari, Garden Estate ↔ Thome ↔ Ridgeways ↔ Ridgeway, Kileleshwa ↔ Riverside, South C ↔ Mombasa Rd, Kitengela Road ↔ Lang'ata, Kyuna ↔ Kiambu Road, Off Loresho Ridge Road ↔ Loresho.
+
+**Known gaps (cause false positives in current run):** agents use inconsistent suburb names with prefixes (Off, Near, Along), abbreviations (Rd/Road), and sub-area names that don't match the canonical suburb. The adjacency map needs two improvements: (1) name normalization (strip prefixes, collapse abbreviations) before comparison, and (2) a geography-driven rebuild rather than reactive patching. Planned for next session.
 
 ---
 
@@ -72,29 +79,34 @@ Lavington ↔ Kilimani, Westlands ↔ Loresho ↔ Mountain View, Karen ↔ Lang'
 ### Weights (sum to 1.0)
 | Signal    | Weight | Rationale |
 |-----------|--------|-----------|
-| pHash     | 0.35   | Anchor signal; already pre-filtered by blocking step |
+| Image     | 0.35   | Anchor signal; already pre-filtered by blocking step |
 | Price     | 0.25   | Strongest factual discriminator after image |
 | Bedrooms  | 0.20   | Hard to mis-scrape, strong negative signal when mismatched |
 | Baths     | 0.10   | Often null on BRK side, lower confidence |
 | Location  | 0.10   | Unreliable as negative signal (suburbs overlap empirically) |
 
+*Note: location weight may increase to 0.15 (taking 0.05 from image) once the adjacency map is properly built. Currently too unreliable to weight higher — false non-adjacency would penalise real matches.*
+
 ### Tier thresholds (dissimilarity scale — lower = more similar)
 | Tier        | Score range | Action |
 |-------------|-------------|--------|
-| Auto-merge  | < 0.30      | Same property, merge automatically |
-| Review      | 0.30 – 0.50 | Probable match, needs human verification |
+| Auto-merge  | < 0.36      | Same property, merge automatically |
+| Review      | 0.36 – 0.50 | Probable match, needs human verification |
 | Distinct    | > 0.50      | Different properties |
 
-### Validation against actual scorer run (58 candidate pairs)
-- **10 auto-merge:** all have matching price + beds + location; 8 with identical baths, 2 with 1-bath difference (scraping inconsistency). Includes all 3 manually verified distance-6 pairs.
-- **34 review:** mix of probable matches (distance-10, all fields match except image borderline) and ambiguous cases (1-bed difference, or non-adjacent suburbs). Manual spot-check needed.
-- **14 distinct:** all show multiple disagreeing signals (price gap + bed mismatch + different suburb). Correctly rejected.
-- Confirmed false positive (BRK 801 ↔ P24 1232, Kiambu Road) scored 0.487 → review, not auto-merge ✓
+### Threshold evolution
+- v1: auto-merge < 0.30. Too tight — confirmed 5-bed Runda KSh 100M match scored 0.313 (1-bath difference between sources).
+- v2: auto-merge < 0.32. Caught the Runda pair. Still missed distance-10 pairs where all other fields matched.
+- v3 (current): auto-merge < 0.36. Catches "high image distance but everything else matches" pairs. Validated against hand-checked results (see Section 4).
+
+### Current validation results (triple-hash blocking, latest run)
+- **116 auto-merge:** 103 verified correct (~89% precision). 13 false positives — mostly caused by structurally similar modern houses scoring low on triple-hash despite being different properties. Most would be fixed by a proper adjacency map (Karen↔Runda pairs incorrectly scored as non-adjacent scored just under threshold due to very low image distance).
+- **82 review:** 27 verified correct matches (~33% true positive rate). Remainder are false positives with borderline image similarity.
+- **849 distinct:** spot-checked ~50, found 1 missed match (very low precision loss). Most are correctly rejected.
 
 ---
 
 ## 4. Baseline validation
-*(to be filled in once there's a scorer to validate)*
 
 **First quantified Stage 1 result (12,321 P24 listings).**
 Grouping key `image_url + bedrooms + baths + size_sqm + price` (no location): **4,427 of 12,321 listings collapse as redundant (~36% bloat)** → ~7,894 distinct products. This is the first hard dedup number, defensible for README/interview ("P24's Nairobi house listings are ~36% redundant; PropDeDupe collapses them to ~7,900 distinct products").
@@ -104,6 +116,8 @@ Grouping key `image_url + bedrooms + baths + size_sqm + price` (no location): **
 **Caveat on the key — it's effectively 4 fields, not 5.** `size_sqm` is `null` for nearly all P24 result-page tiles (the site rarely exposes floor size on the listing card). So the distinguishing work is really done by `image_url + bedrooms + baths + price`; sqm contributes only on the rare rows where it's populated. Not a bug, but worth knowing the key is thinner in practice than on paper.
 
 **Top clusters are developments, and collapsing them is correct behaviour.** The largest cluster (74 listings: Katani, 3bed/4bath, KSh 10.5M) is the Eden Villas / Savannah Park development. Per Finding 2 above, the grouping can't distinguish "74 real identical units" from "1 house relisted 74 times" — but for the aggregator both should show once, so a 74→1 collapse is intended, not an error.
+
+**Note on intra-P24 vs cross-source:** Stage 1 (cluster_key) handles intra-P24 dedup using exact field matching — no perceptual hashing needed since same-source listings share exact image URLs. Cross-source dedup (BRK ↔ P24) requires perceptual hashing because different CDNs, image sizes, and watermarks prevent exact matching. These are complementary, not overlapping — cluster_key catches the bulk volume (36% of P24), triple-hash catches the cross-source overlap (~100–150 candidate pairs).
 
 ---
 
@@ -122,40 +136,66 @@ This directly confirms standing rule #6 ("image match is not auto-conclusive: de
 **Finding 2 — the real bloat is intra-type re-listing, and the fields we already store are enough to collapse it.**
 Refined the mental model with real examples: within a development, the distinct *products* are type variants (A, B, C) which genuinely differ in beds/baths/sqm/price. But agencies post every *instance* of a type as its own listing — A1, A2, ... A10 — all identical on every field a buyer can see. From a buyer's search perspective these are indistinguishable bloat; one listing for "Type A in Eden Villas" is all that's useful.
 
-Key consequence: **we do not need address parsing or unit-count regex to collapse this.** The fields already stored — `image_url` + `bedrooms` + `baths` + `size_sqm` + `price` — already distinguish type A from B/C (they differ on beds/baths/sqm) while collapsing A1–A10 (identical on all). Grouping on those existing fields does the work. (An earlier idea to regex the stated unit count out of the description, or to lean on the `address` column as the primary differentiator, was considered and dropped as over-engineering — the stored numeric fields are sufficient and simpler.)
+Key consequence: **we do not need address parsing or unit-count regex to collapse this.** The fields already stored — `image_url` + `bedrooms` + `baths` + `size_sqm` + `price` — already distinguish type A from B/C (they differ on beds/baths/sqm) while collapsing A1–A10 (identical on all). Grouping on those existing fields does the work.
 
-**Honest caveat on Finding 2:** this grouping cannot by itself distinguish "10 real identical units in a development" from "1 house spam-relisted 10 times" — both collapse into one group. But **for the aggregator's purpose this distinction may not matter**: either way the buyer wants to see the product once (optionally with a "N units available" note), so collapsing serves the buyer identically. The distinction only matters for counting true housing inventory, which is not the product goal. `address` was still added to the schema (cheap now, useful later for precise geocoding / Phase 2), but it is a nice-to-have detail, not load-bearing for Stage 1 grouping.
+**Honest caveat on Finding 2:** this grouping cannot by itself distinguish "10 real identical units in a development" from "1 house spam-relisted 10 times" — both collapse into one group. But **for the aggregator's purpose this distinction may not matter**: either way the buyer wants to see the product once (optionally with a "N units available" note), so collapsing serves the buyer identically.
 
-**Finding 3 — `cluster_key` computed in Python must match SQL's `md5()` byte-for-byte, and float→string casting is the trap.** `cluster_key` (an `md5` hash of `image_url|bedrooms|baths|size_sqm|price`) was first backfilled via SQL, then a Python helper (`compute_cluster_key()` in `save.py`) was added so new scrapes compute it at save time. First attempt produced a key that did **not** match any existing row (count = 0), despite using the identical field values. Cause: Postgres's `numeric(x,y)::text` cast always renders the column's *declared decimal scale* (e.g. `numeric(3,1)` → `"4.0"`, `numeric(10,2)` → `"10500000.00"`), but Python's plain `str()` on a float does not know that scale (`str(4.0)` → `"4.0"` is fine, but inconsistent rounding/trailing-zero behaviour across values caused mismatches). Fixed by formatting Python's numeric fields with explicit decimal places matching each column's scale (`f"{baths:.1f}"`, `f"{price:.2f}"`, `f"{size_sqm:.2f}"`) rather than relying on `str()`. Confirmed fixed when a freshly-scraped listing's Python-computed key matched an existing DB row (count ≥ 1).
+**Finding 3 — `cluster_key` computed in Python must match SQL's `md5()` byte-for-byte, and float→string casting is the trap.** Fixed by formatting Python's numeric fields with explicit decimal places matching each column's scale (`f"{baths:.1f}"`, `f"{price:.2f}"`, `f"{size_sqm:.2f}"`).
 
-**Standing rule this creates:** the Python and SQL key formulas must be kept byte-for-byte identical (field order, separator, decimal formatting, null-handling) — any future change to one must be mirrored in the other, or newly-scraped listings will silently stop matching their own historical duplicates.
+**Standing rule:** the Python and SQL key formulas must be kept byte-for-byte identical — any future change to one must be mirrored in the other.
 
-**Finding 4 — unordered `.range()` pagination can silently corrupt a `set()`-based distinct count, even when the total row count looks correct.** Building the perceptual-hash backfill required fetching all distinct `image_url` values via paginated `.range()` calls (Supabase caps a single query at 1,000 rows). First version had no `.order()` clause before `.range()`. Result: total rows fetched across all batches was exactly correct (12,321, matching the known table size) — but distinct URLs computed from those rows came out as **4,496**, versus SQL's independently-verified **6,996** (confirmed via two separate checks: grouping by `length(image_url)`, and comparing `count(distinct image_url)` with/without stripping CDN query params — both ruled out data-side explanations).
+**Finding 4 — unordered `.range()` pagination can silently corrupt a `set()`-based distinct count, even when the total row count looks correct.** Fixed by adding `.order("id")` before `.range()` in every paginated fetch.
 
-Root cause: without an explicit sort, Postgres/PostgREST has no guaranteed stable ordering to slice against, so successive `.range(0,999)`, `.range(1000,1999)`, etc. calls are not guaranteed to return a clean, non-overlapping partition of the table. Some rows can be returned in more than one batch (harmless for a distinct count — duplicates don't add new values) while others can be skipped by every batch (silently invisible to the running `set()`, and this *does* lose real distinct values). Because skipped and duplicated rows happened to roughly balance out, the **total row count still looked correct**, masking the bug — only the distinct-value count revealed it.
-
-Fix: add `.order("id")` immediately before `.range()` in every paginated fetch. This gives Postgres a fixed, deterministic sort to slice against, guaranteeing each row is fetched exactly once across all batches. Confirmed fixed when the Python distinct count matched SQL's exactly (6,996 = 6,996).
-
-**Standing rule this creates:** any paginated fetch using `.range()` must include an explicit `.order()` on a unique column (e.g. `id`) beforehand. A correct total row count is *not* sufficient evidence that pagination is working correctly — only a correct distinct/content check catches this class of bug.
+**Standing rule:** any paginated fetch using `.range()` must include an explicit `.order()` on a unique column beforehand.
 
 **Finding 5 — Cross-source pHash matching validates perceptual hashing as the anchor signal for BRK↔P24 dedup.**
 Compared 1,124 distinct BRK hashes × 6,256 distinct P24 hashes (~7M pairs) via Hamming distance. Results at threshold ≤ 10: 58 candidate pairs (distance 6: 3 pairs, distance 8: 15, distance 10: 40).
 
 Manual verification of distance-6 pairs — all three confirmed real cross-source duplicates:
 - BRK 931 ↔ P24 8341: 5-bed Kileleshwa, KSh 70M on both sites.
-- BRK 298 ↔ P24 2357/3210/17834: 4-bed Loresho, KSh 75M on both. P24 had it listed three times; BRK once.
+- BRK 298 ↔ P24 2357/3210/17834: 4-bed Loresho, KSh 75M on both.
 - BRK 275 ↔ P24 1794: 6-bed Gigiri, KSh 150M on both sites.
 
-Distance-8 pairs are mixed: several confirmed (5-bed Runda KSh 100M, 5-bed Runda KSh 190M, 9-bed Karen KSh 250M) but at least one false positive (BRK 801 ↔ P24 1232 — different houses on Kiambu Road with similar architectural style, different prices: KSh 60M vs 55M).
-
-**Working threshold: 8.** Distance ≤ 6 appears highly reliable (3/3 confirmed). Distance 8 has real matches but also false positives — these need secondary signals (price, beds/baths, location) to disambiguate. Distance 10 is likely mostly noise (40 pairs, climbing sharply). The weighted scorer's job is to separate real matches from false positives in the 7–10 range using non-image signals.
-
-**BRK baths are universally null** — the JSON-LD on BRK's results page doesn't include baths as a structured field. The data exists on BRK's detail pages (confirmed manually: listing 801 shows "5 Bathrooms" on its detail page). This is a data quality gap to fill before the weighted scorer runs, since baths agreement is a secondary signal.
+Distance-8 pairs are mixed: several confirmed, at least one false positive. Working threshold: 8 for phash alone.
 
 **Finding 6 — BRK detail pages expose structured baths and URL via JSON-LD, despite results pages dropping listing data.**
-BRK changed their results-page JSON-LD (no longer contains `mainEntity.itemListElement` — now site-level metadata only). However, detail pages still embed a rich `@graph` with `Accommodation` (`numberOfBathroomsTotal`, `numberOfBedrooms`) and `Offer` (`url`) nodes. Backfill script fetches `buyrentkenya.com/listings/item-XXXXXXX` (redirects to real slug URL), parses the JSON-LD, and updates `baths` + `url`. Result: 1,184/1,206 BRK listings now have baths populated; ~20 returned no data (likely delisted); 1 network timeout. The `baths IS NULL` filter makes the script idempotent — safe to re-run for the stragglers.
+BRK changed their results-page JSON-LD (no longer contains listing data). Detail pages still embed `Accommodation` (`numberOfBathroomsTotal`) and `Offer` (`url`) nodes. Backfill result: 1,184/1,206 BRK listings now have baths populated. The `baths IS NULL` filter makes the script idempotent.
+
+**Finding 7 — Watermarks inflate pHash distances; triple-hash min(phash, ahash, whash) gives clean separation between matches and false positives.**
+Tested phash, ahash, dhash, and whash across 8 confirmed cross-source matches and 3 confirmed false positives.
+
+- **dhash** is unusable (worst on every pair, 11–16 on matches). Dropped.
+- **phash alone** cannot separate matches from false positives — both score 10 at the boundary.
+- **ahash** excels on some pairs (scored 1 on Gigiri, 2 on Kileleshwa) but inconsistent (9 on Loresho).
+- **whash** excels on different pairs (scored 2 on Braeburn, 4 on Runda 160M) but also inconsistent alone.
+- **min(phash, ahash, whash)** gives clean separation:
+  - Matches: max min-distance = 7 (across 8 verified pairs)
+  - False positives: min min-distance = 10 (across 3 verified pairs)
+  - Gap: 7 to 10 — threshold of 8 catches all matches, rejects all false positives.
+
+Cropping (bottom 10–20%) was tested first and made distances *worse* — watermarks are center-overlaid, not bottom-only.
+
+**2-of-3 agreement rule:** initial implementation using bare `min()` across three hashes produced too many false positives (171 auto-merge, many wrong). A single hash algorithm can fluke a low distance on structurally similar but different houses. Requiring at least 2 of the 3 hashes to score ≤ threshold filters this noise, reducing to 116 auto-merge with ~89% precision.
+
+**Finding 8 — agents list the same property with wildly different metadata across portals.**
+Spot-checking the distinct tier revealed confirmed matches hiding there:
+- BRK 3 ↔ P24 5905: same 5-bed house, KSh 55M vs 85M (~35% gap), different suburb names ("Near Braeburn School" vs "Lavington"), posted ~2 months apart.
+- BRK 202 ↔ P24 3930: same house, listed as 8-bed KSh 250M on BRK vs 4-bed KSh 220M on P24.
+
+These confirm that image matching catches real duplicates that field-based signals would never find — agents list the same house with different prices, bedroom counts, and suburb names across portals. These are inherently hard cases that the heuristic scorer cannot reliably catch without stronger image understanding (see Section 6).
 
 ---
 
-## 6. Phase B: model comparison (future, conditional)
-*(trigger criteria and scope to be defined once Phase A has verified labels)*
+## 6. Phase B: future improvements (conditional)
+
+### 6a. Suburb adjacency map rework (immediate — next session)
+The current adjacency map is reactively patched and has known gaps. Needs: (1) a name normalization step (strip "Off/Near/Along" prefixes, collapse "Rd"/"Road" etc.) before comparison, and (2) a geography-driven rebuild using local Nairobi knowledge rather than adding suburbs as they surface in errors. Expected to fix ~half of the current 13 false positives in auto-merge.
+
+### 6b. SSIM verification (conditional — if review queue stays noisy after adjacency fix)
+SSIM (Structural Similarity Index) compares two images at full resolution across brightness, contrast, and structure. Too expensive for blocking (~7M pairs), but viable as a **second-opinion scorer signal** on the ~100–200 candidate pairs that pass hash blocking. Would replace or supplement the hash distance signal in the scorer with something more accurate. Trigger: if review queue precision stays below 50% after the adjacency fix.
+
+### 6c. Embedding-based matching (future — when same-house-different-photo cases emerge)
+Neural image embeddings (e.g. CLIP) convert images to semantic vectors, enabling matching even when agents use completely different photos of the same property (different angle, different day). This is fundamentally beyond what any perceptual hash can do — hashing compares pixel patterns, embeddings compare meaning. Trade-offs: heavier dependencies (PyTorch/ONNX), more compute (~1–2 hours on a laptop for ~13,500 images), larger storage (512 floats per image vs 64 bits for a hash). Trigger: confirmed same-house-different-photo cases in the data (not yet observed). Worth mentioning in README as the designed upgrade path.
+
+### 6d. Phase B: learned model (future — post-placement)
+The hand-verified pairs from the Phase A spot-checking provide labeled training data. A small classifier (logistic regression or gradient-boosted tree) could be trained on the signal vector to learn optimal weights and thresholds from data rather than hand-tuning. Only worth pursuing if the heuristic scorer's precision plateaus below an acceptable level and manual weight tuning stops yielding improvements. The heuristic scorer remains the baseline to beat.
