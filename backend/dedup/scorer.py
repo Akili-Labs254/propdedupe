@@ -4,6 +4,7 @@ Each signal outputs a dissimilarity score (0 = identical, 1 = different).
 Weighted sum determines tier: auto-merge / review / distinct.
 """
 from typing import Optional, Dict, Tuple
+from backend.dedup.adjacency import location_dissimilarity
 
 
 # --- Weights (must sum to 1.0) ---
@@ -11,38 +12,14 @@ WEIGHTS = {
     "image": 0.30,
     "price": 0.25,
     "bedrooms": 0.20,
-    "baths": 0.10,
-    "location": 0.15,
+    "baths": 0.05,
+    "location": 0.20,
 }
 
 # --- Tier thresholds (dissimilarity: lower = more similar) ---
 TIER_AUTO_MERGE = 0.36
 TIER_REVIEW = 0.50
 # Above TIER_REVIEW = distinct
-
-
-# --- Suburb adjacency map ---
-# Each entry is a set of suburbs considered adjacent.
-# A suburb is adjacent to itself and to everything in its group.
-ADJACENCY_GROUPS = [
-    {"lavington", "kilimani"},
-    {"westlands", "loresho", "mountain view"},
-    {"karen", "lang'ata", "langata", "hardy", "karen hardy", "miotoni road", "kerarapon road", "kcb leadership"},
-    {"runda", "gigiri", "kiambu road"},
-    {"garden estate", "thome", "ridgeways", "ridgeway"},
-    {"kileleshwa", "riverside"},
-    {"south c", "mombasa rd"},
-    {"kitengela road", "langata", "lang'ata"},
-    {"nyari", "runda", "gigiri"},
-    {"kyuna", "kiambu road", "runda"},
-    {"off loresho ridge road", "loresho"},
-]
-
-# Build a lookup: suburb -> set of all adjacent suburbs (including itself)
-_ADJACENCY_MAP: Dict[str, set] = {}
-for group in ADJACENCY_GROUPS:
-    for suburb in group:
-        _ADJACENCY_MAP.setdefault(suburb, set()).update(group)
 
 
 def _score_image(distance: int) -> float:
@@ -79,24 +56,6 @@ def _score_baths(a: Optional[float], b: Optional[float]) -> float:
     return min(diff, 3) / 3.0
 
 
-def _score_location(a: Optional[str], b: Optional[str]) -> float:
-    """
-    Same suburb -> 0.0, adjacent -> 0.3, non-adjacent -> 0.7.
-    Null -> 0.3 (same as adjacent = mild uncertainty).
-    """
-    if a is None or b is None:
-        return 0.3
-    a_lower = a.strip().lower()
-    b_lower = b.strip().lower()
-    if a_lower == b_lower:
-        return 0.0
-    # Check adjacency
-    adjacent_to_a = _ADJACENCY_MAP.get(a_lower, set())
-    if b_lower in adjacent_to_a:
-        return 0.3
-    return 0.7
-
-
 def score_pair(
     phash_distance: int,
     price_a: Optional[float],
@@ -117,7 +76,7 @@ def score_pair(
         "price": _score_price(price_a, price_b),
         "bedrooms": _score_bedrooms(beds_a, beds_b),
         "baths": _score_baths(baths_a, baths_b),
-        "location": _score_location(location_a, location_b),
+        "location": location_dissimilarity(location_a, location_b),
     }
 
     total = sum(WEIGHTS[k] * signals[k] for k in WEIGHTS)
@@ -128,5 +87,9 @@ def score_pair(
         tier = "review"
     else:
         tier = "distinct"
+    
+    # Location gate: non-adjacent pairs can't auto-merge
+    if signals["location"] >= 0.5 and tier == "auto-merge":
+        tier = "review"
 
     return total, tier, signals
