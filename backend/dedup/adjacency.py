@@ -72,6 +72,8 @@ _ALIASES = {
     'githurai 44': 'githurai',
     'ngumo estate': 'ngumo',
     'garden city': 'garden estate',
+    'old runda': 'runda',
+    'loresho ridge road': 'loresho',
     'komarock': 'koma rock',        # BRK spelling vs P24 "Koma Rock"
 
     # ── BRK road names → suburb ──
