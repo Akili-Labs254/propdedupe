@@ -72,6 +72,19 @@ Current map covers: Lavington ↔ Kilimani, Westlands ↔ Loresho ↔ Mountain V
 
 **Known gaps (cause false positives in current run):** agents use inconsistent suburb names with prefixes (Off, Near, Along), abbreviations (Rd/Road), and sub-area names that don't match the canonical suburb. The adjacency map needs two improvements: (1) name normalization (strip prefixes, collapse abbreviations) before comparison, and (2) a geography-driven rebuild rather than reactive patching. Planned for next session.
 
+### Location signal
+Uses `backend/dedup/adjacency.py`. Two layers:
+1. Name normalization: strips prefixes (Off/Near/Along), expands abbreviations
+   (Rd→Road), maps ~70 BRK street/estate names to canonical P24 suburbs.
+2. Adjacency graph: 78 Nairobi suburbs, 100 edges. Sources: P24 suburb API,
+   Wikipedia, sub-county ward data, pipeline false-positive analysis.
+
+Four-tier output: same suburb (0.0), adjacent (0.3), known-but-far (0.5),
+unknown (0.8). Unknown scores 0.8 not 1.0 — per rule #5, no single field vetoes.
+
+Location gate: if location_score >= 0.5, pair cannot auto-merge (goes to review
+at minimum). Prevents visually similar houses in distant suburbs from merging.
+
 ---
 
 ## 3. Weighting & tiers
@@ -103,6 +116,15 @@ Current map covers: Lavington ↔ Kilimani, Westlands ↔ Loresho ↔ Mountain V
 - **116 auto-merge:** 103 verified correct (~89% precision). 13 false positives — mostly caused by structurally similar modern houses scoring low on triple-hash despite being different properties. Most would be fixed by a proper adjacency map (Karen↔Runda pairs incorrectly scored as non-adjacent scored just under threshold due to very low image distance).
 - **82 review:** 27 verified correct matches (~33% true positive rate). Remainder are false positives with borderline image similarity.
 - **849 distinct:** spot-checked ~50, found 1 missed match (very low precision loss). Most are correctly rejected.
+
+### Current weights (v3)
+image: 0.30, price: 0.25, bedrooms: 0.20, baths: 0.05, location: 0.20
+
+Evolution: baths reduced 0.10→0.05 (most arbitrarily listed signal across
+sources), location increased 0.15→0.20 (adjacency map now reliable enough
+to justify higher weight).
+
+Tiers unchanged: auto-merge <0.36, review 0.36–0.50, distinct >0.50.
 
 ---
 
@@ -183,6 +205,19 @@ Spot-checking the distinct tier revealed confirmed matches hiding there:
 - BRK 202 ↔ P24 3930: same house, listed as 8-bed KSh 250M on BRK vs 4-bed KSh 220M on P24.
 
 These confirm that image matching catches real duplicates that field-based signals would never find — agents list the same house with different prices, bedroom counts, and suburb names across portals. These are inherently hard cases that the heuristic scorer cannot reliably catch without stronger image understanding (see Section 6).
+
+### Finding 9 — BRK uses street-level locations, P24 uses suburb-level
+
+BRK location column contains ~100 distinct values, mostly road names
+("Chalbi Drive", "Ole Dume Rd", "Njumbi Road") and estate names
+("Runda Mimosa", "Lavington Green"). P24 uses suburb names ("Lavington",
+"Runda", "Kilimani"). Without normalization, cross-source pairs score 0.8
+(unknown) on location even when the street is inside the suburb.
+
+Fix: alias table mapping BRK roads/estates to their containing P24 suburb.
+Built from local Nairobi knowledge. ~70 mappings cover ~80% of BRK locations.
+Remainder falls through to 0.8 (unknown) — acceptable since location weight
+is 0.20 and other signals can override.
 
 ---
 
