@@ -366,33 +366,9 @@ def main():
     print(f"  Step 2 — Cluster properties: {step2_created} ({step2_joined} listings joined existing)")
     print(f"  Total properties so far: {step1_created + step2_created}")
     print(f"  Tiers: {tier_counts}")
-    print(f"\n  Step 3: Run the SQL block in Supabase SQL Editor (see bottom of this file).")
+
 
 
 if __name__ == "__main__":
     main()
 
-
-# ── Step 3 SQL (run in Supabase SQL Editor after this script) ────
-#
-# Creates one property per remaining unlinked listing. Runs entirely
-# inside Postgres — no network round-trips, finishes in seconds.
-#
-# DO $$
-# DECLARE
-#     rec RECORD;
-#     new_pid BIGINT;
-# BEGIN
-#     FOR rec IN
-#         SELECT id, title, price, location, bedrooms, baths, size_sqm, image_url
-#         FROM listings
-#         WHERE property_id IS NULL
-#         ORDER BY id
-#     LOOP
-#         INSERT INTO properties (title, price, location, bedrooms, bathrooms, size_sqm, image_url, source_count)
-#         VALUES (rec.title, rec.price, rec.location, rec.bedrooms, rec.baths, rec.size_sqm, rec.image_url, 1)
-#         RETURNING id INTO new_pid;
-#
-#         UPDATE listings SET property_id = new_pid WHERE id = rec.id;
-#     END LOOP;
-# END $$;
