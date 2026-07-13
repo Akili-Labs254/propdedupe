@@ -2,16 +2,16 @@
 Persist dedup pipeline results to the database.
 
 Runs the same blocking + scoring pipeline as run_scorer.py, then:
-1. Inserts all scored pairs into the `matches` table
-2. Groups auto-merge pairs into connected components (one per property)
-3. Creates a `properties` row for each group
-4. Sets `property_id` on every listing in each group
+  Step 1: Cross-source — scores pairs, inserts matches, groups auto-merge
+          pairs via Union-Find into properties, links member listings.
+  Step 2: Intra-P24 — collapses cluster_key duplicate groups into properties.
+  Step 3: Singletons — run via SQL in Supabase SQL Editor (see bottom of file).
 
-Run: python -u -m scripts.persist_dedup 2>&1 | tee data/persist_dedup.log
-Re-runnable: clears previous results before inserting (matches table
-truncated, property_id reset to NULL, properties table cleared).
+Run: caffeinate -i python -u -m scripts.persist_dedup 2>&1 | tee data/persist_dedup.log
+Re-runnable: clears previous results before inserting.
 """
 from typing import Dict, List, Set, Optional
+from collections import defaultdict
 from backend.db.client import get_client
 from backend.dedup.scorer import score_pair
 from scripts.cross_source_match import (
@@ -195,7 +195,7 @@ def main():
         tier_counts[s["tier"]] = tier_counts.get(s["tier"], 0) + 1
     print(f"  Tiers: {tier_counts}")
 
-    # ── 1. Insert matches ────────────────────────────────────────
+    # ── Step 1: Insert matches ───────────────────────────────────
     print("\nInserting matches...")
     match_rows = []
     for s in scored:
@@ -221,7 +221,7 @@ def main():
         db.table("matches").insert(chunk).execute()
     print(f"  Inserted {len(match_rows)} match rows.")
 
-    # ── 2. Group auto-merge pairs into properties ────────────────
+    # ── Step 1b: Group auto-merge pairs into properties ──────────
     uf = UnionFind()
     auto_merge_pairs = [s for s in scored if s["tier"] == "auto-merge"]
 
@@ -235,9 +235,9 @@ def main():
     groups = uf.groups()
     print(f"\n{len(groups)} property groups from {len(auto_merge_pairs)} auto-merge pairs")
 
-    # ── 3. Create property rows and link listings ────────────────
+    # Create property rows and link listings
     print("Creating properties and linking listings...")
-    created = 0
+    step1_created = 0
 
     for root_id, member_ids in groups.items():
         primary = pick_primary(member_ids, details)
@@ -273,16 +273,126 @@ def main():
                 .eq("id", lid) \
                 .execute()
 
-        created += 1
+        step1_created += 1
 
-    print(f"  Created {created} properties, linked {sum(len(v) for v in groups.values())} listings.")
+    print(f"  Created {step1_created} properties, linked {sum(len(v) for v in groups.values())} listings.")
+
+    # ── Step 2: Intra-P24 cluster_key groups → properties ────────
+    print("\n--- Step 2: Intra-P24 cluster_key groups ---")
+
+    # Fetch all P24 listings with a cluster_key (paginated)
+    all_p24 = []
+    offset = 0
+    BATCH_SIZE = 1000
+    while True:
+        batch = (db.table("listings")
+                 .select("id, cluster_key, property_id, title, price, location, bedrooms, baths, size_sqm, image_url")
+                 .eq("source_id", 2)
+                 .not_.is_("cluster_key", "null")
+                 .order("id")
+                 .range(offset, offset + BATCH_SIZE - 1)
+                 .execute())
+        if not batch.data:
+            break
+        all_p24.extend(batch.data)
+        if len(batch.data) < BATCH_SIZE:
+            break
+        offset += BATCH_SIZE
+
+    print(f"  Fetched {len(all_p24)} P24 listings with cluster_key")
+
+    # Group by cluster_key in Python
+    clusters = defaultdict(list)
+    for listing in all_p24:
+        clusters[listing["cluster_key"]].append(listing)
+
+    multi_clusters = {k: v for k, v in clusters.items() if len(v) > 1}
+    print(f"  {len(multi_clusters)} clusters with >1 listing")
+
+    step2_created = 0
+    step2_linked = 0
+    step2_joined = 0  # linked to existing cross-source property
+
+    for cluster_key, members in multi_clusters.items():
+        # Check if any member already has a property_id from Step 1
+        existing_pid = None
+        for m in members:
+            if m["property_id"] is not None:
+                existing_pid = m["property_id"]
+                break
+
+        if existing_pid:
+            # Link unlinked members in one call
+            unlinked_ids = [m["id"] for m in members if m["property_id"] is None]
+            if unlinked_ids:
+                db.table("listings") \
+                    .update({"property_id": existing_pid}) \
+                    .in_("id", unlinked_ids) \
+                    .execute()
+                step2_linked += len(unlinked_ids)
+                step2_joined += len(unlinked_ids)
+        else:
+            # Create a new property from the first member
+            rep = members[0]
+            prop_data = {
+                "title": rep.get("title"),
+                "price": float(rep["price"]) if rep.get("price") else None,
+                "location": rep.get("location"),
+                "bedrooms": rep.get("bedrooms"),
+                "bathrooms": float(rep["baths"]) if rep.get("baths") else None,
+                "size_sqm": float(rep["size_sqm"]) if rep.get("size_sqm") else None,
+                "image_url": rep.get("image_url"),
+                "source_count": 1,
+            }
+            result = db.table("properties").insert(prop_data).execute()
+            pid = result.data[0]["id"]
+            step2_created += 1
+
+            # Link all members in one call
+            member_ids = [m["id"] for m in members]
+            db.table("listings") \
+                .update({"property_id": pid}) \
+                .in_("id", member_ids) \
+                .execute()
+            step2_linked += len(members)
+
+    print(f"  Created {step2_created} new properties")
+    print(f"  Linked {step2_linked} listings ({step2_joined} joined existing cross-source properties)")
 
     # ── Summary ──────────────────────────────────────────────────
-    print(f"\n=== Done ===")
+    print(f"\n=== Done (Steps 1 + 2) ===")
     print(f"  Matches inserted: {len(match_rows)}")
-    print(f"  Properties created: {created}")
+    print(f"  Step 1 — Cross-source properties: {step1_created}")
+    print(f"  Step 2 — Cluster properties: {step2_created} ({step2_joined} listings joined existing)")
+    print(f"  Total properties so far: {step1_created + step2_created}")
     print(f"  Tiers: {tier_counts}")
+    print(f"\n  Step 3: Run the SQL block in Supabase SQL Editor (see bottom of this file).")
 
 
 if __name__ == "__main__":
     main()
+
+
+# ── Step 3 SQL (run in Supabase SQL Editor after this script) ────
+#
+# Creates one property per remaining unlinked listing. Runs entirely
+# inside Postgres — no network round-trips, finishes in seconds.
+#
+# DO $$
+# DECLARE
+#     rec RECORD;
+#     new_pid BIGINT;
+# BEGIN
+#     FOR rec IN
+#         SELECT id, title, price, location, bedrooms, baths, size_sqm, image_url
+#         FROM listings
+#         WHERE property_id IS NULL
+#         ORDER BY id
+#     LOOP
+#         INSERT INTO properties (title, price, location, bedrooms, bathrooms, size_sqm, image_url, source_count)
+#         VALUES (rec.title, rec.price, rec.location, rec.bedrooms, rec.baths, rec.size_sqm, rec.image_url, 1)
+#         RETURNING id INTO new_pid;
+#
+#         UPDATE listings SET property_id = new_pid WHERE id = rec.id;
+#     END LOOP;
+# END $$;
