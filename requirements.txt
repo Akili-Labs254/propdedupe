@@ -1,17 +1,14 @@
-# PropDeDupe — Phase 0 dependencies (install only what day-one needs).
-# More libraries get added in the weeks they're first used — keeping this
-# file honest is itself good practice.
+# PropDeDupe dependencies
 
 requests==2.32.3
 beautifulsoup4==4.12.3
 python-dotenv==1.0.1
+supabase
+imagehash
+fastapi
+uvicorn[standard]
 
 # ── Planned (uncomment as we reach each stage) ──────────────────────────
-# rapidfuzz            # Week 3-4: text similarity for matching titles
-# Pillow               # Week 4:   open images for hashing
-# imagehash            # Week 4:   perceptual hashing (phash) of listing images
-# fastapi              # Week 5-6: the API that serves deduplicated results
-# uvicorn[standard]    # Week 5-6: ASGI server to run FastAPI
-# supabase             # when wiring scraper -> database
+# rapidfuzz            # text similarity for matching titles
 # psycopg2-binary      # alternative: direct Postgres access
 # pytest               # when the first real tests are written
