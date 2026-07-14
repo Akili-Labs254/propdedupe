@@ -9,6 +9,8 @@ The --reload flag watches for file changes and auto-restarts (dev only).
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.db.client import get_client
+from backend.api.routes.properties import router as properties_router
+from backend.api.routes.review import router as review_router
 
 app = FastAPI(
     title="PropDeDupe API",
@@ -25,6 +27,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(properties_router)
+app.include_router(review_router)
 
 @app.get("/")
 def root():
