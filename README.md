@@ -1,100 +1,92 @@
 # PropDeDupe
 
-**A deduplication engine for the Kenyan real estate market.**
+Property listing deduplication engine for the Nairobi real estate market.
 
-Listing sites like BuyRentKenya and Property24 Kenya are flooded with
-duplicates — the same property posted by several agents, sometimes under
-different neighbourhoods and prices. It makes house-hunting painful.
-PropDeDupe scrapes these sites, detects which listings are the same property,
-and surfaces one clean result per home.
+## Why this exists
 
-> **Status:** In active development — Phase 0 (foundations). See the roadmap below.
+Nairobi's property market is split across multiple listing sites
+(BuyRentKenya, Property24, among others) and they're full of duplicates.
+The same house shows up 3-7 times on Property24 alone, sometimes under
+different suburbs. If you're actually trying to find a house — like my
+stepdad was — you end up scrolling through the same listings over and over
+across multiple sites, with no way to tell what's genuinely new.
 
-## The problem
+I wanted to build something that pulls listings from multiple sources,
+figures out which ones are the same property, and collapses them down to
+one clean result per actual house. At its core this is an entity resolution
+problem — turning many noisy records into one canonical entity per
+real-world property.
 
-A single house can appear three or more times in search results. Scraping recon
-on Property24 found one 5-bedroom house listed three times under *Westlands*,
-*Loresho*, and *Mountain View* — same price, same photo. Multiply that across
-thousands of listings and search becomes nearly unusable.
+## What it does
 
-## How it works
+Scrapes about 13,500 listings from two Nairobi property sites and
+deduplicates them down to roughly 8,950 distinct properties — **about 34%
+were duplicates.**
 
-A three-stage pipeline over a single PostgreSQL database:
+The dedup pipeline works in layers:
 
-1. **Scrape** — collect raw listings from each source.
-2. **Deduplicate** — group listings that describe the same property using image
-   matching, text similarity, and price/location proximity.
-3. **Serve** — expose clean, deduplicated results through an API (and a thin
-   frontend).
+- **Intra-source (Property24):** groups identical listings using a composite
+  key (image URL + bedrooms + baths + size + price). This catches the bulk
+  of P24's re-listed bloat — developments posting the same unit type 10-50
+  times, same house posted by multiple agents and agencies.
 
-At its core this is an **entity resolution** problem: turning many noisy records
-into one canonical entity per real-world property.
+- **Cross-source (BRK ↔ P24):** matches listings across sites using
+  perceptual image hashing (triple-hash with 2-of-3 agreement to handle
+  P24's watermarks and different croppings across the sites), then scores
+  pairs on price similarity, bedroom/bath counts, and suburb proximity via
+  a hand-built adjacency map of 78 Nairobi suburbs.
 
-## Tech stack
+Pairs are sorted into three tiers: **auto-merge** (high confidence,
+verified 96% precision), **review queue** (needs a human look), and
+**distinct**.
 
-| Layer     | Choice                                    |
-|-----------|-------------------------------------------|
-| Scraping  | Python · requests · BeautifulSoup         |
-| Matching  | rapidfuzz · imagehash                      |
-| API       | FastAPI                                   |
-| Database  | PostgreSQL (Supabase)                     |
-| Frontend  | Thin web UI (deferred)                    |
+## Live API
 
-## Data sources
+Deployed at **https://propdedupe.onrender.com**
 
-| Site             | Rendering              | Extraction strategy        |
-|------------------|------------------------|----------------------------|
-| Property24 Kenya | Server-side (jQuery)   | HTML selectors             |
-| BuyRentKenya     | Server-side (Livewire) | JSON-LD structured data    |
+Try these:
 
-Two sources, two parsing strategies, one normalized output shape — see
-`backend/scraper/base.py`.
+- [`/stats`](https://propdedupe.onrender.com/stats) — headline dedup numbers
+- [`/properties?per_page=5`](https://propdedupe.onrender.com/properties?per_page=5) — browse deduplicated properties
+- [`/properties?location=karen&bedrooms=4`](https://propdedupe.onrender.com/properties?location=karen&bedrooms=4) — filtered search
+- [`/review?per_page=3`](https://propdedupe.onrender.com/review?per_page=3) — review queue with side-by-side listing pairs and signal breakdowns
 
 ## Project structure
 
 ```
 propdedupe/
 ├── backend/
-│   ├── scraper/   # per-source scrapers + shared fetch utilities
-│   ├── dedup/     # the matching engine (image, text, price/location)
-│   ├── api/       # FastAPI app serving deduplicated results
-│   ├── db/        # schema.sql + queries
-│   └── common/    # config, shared helpers
-├── frontend/      # thin UI (deferred)
-├── data/          # local scratch / scraped cache (gitignored)
-├── tests/
-├── docs/          # architecture & decision notes
-└── scripts/       # one-off utilities
+│   ├── scraper/   # per-source scrapers (JSON-LD for BRK, HTML for P24)
+│   ├── dedup/     # scorer, adjacency map, image matching
+│   ├── api/       # FastAPI endpoints
+│   ├── db/        # schema, client, save utilities
+│   └── common/    # config
+├── scripts/       # scraping, backfill, dedup pipeline runners
+├── docs/          # pipeline plan, decision log
+└── data/          # local scratch (gitignored)
 ```
 
-## Getting started
+## How to run locally
 
 ```bash
-# 1. Clone, then create a virtual environment
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-
-# 2. Install Phase 0 dependencies
+git clone https://github.com/Akili-Labs254/propdedupe.git
+cd propdedupe
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-
-# 3. Configure
-cp .env.example .env             # then fill in your values
-
-# 4. Smoke-test scraping against one real page
-python scripts/spike_fetch.py
+# add SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ADMIN_API_KEY to .env
+uvicorn backend.api.main:app --reload --port 8000
 ```
-
-## Roadmap
-
-- [x] **Phase 0** — repo, schema, environment, first scraper spike
-- [ ] Scrape Property24 + BuyRentKenya into the database
-- [ ] Deduplication engine (image → text → price/location)
-- [ ] FastAPI service for deduplicated results
-- [ ] Thin frontend
-- [ ] Deploy
 
 ## Responsible scraping
 
-This project scrapes only public listing data, identifies its bot honestly via
-User-Agent, rate-limits requests, and caches locally to avoid unnecessary load.
-Respect each site's `robots.txt` and terms of service.
+This project scrapes only publicly listed property data, identifies itself
+honestly via User-Agent, rate-limits requests with random delays, and backs
+off on errors. No images are rehosted — only URLs and perceptual hashes are
+stored.
+
+## What I'd do next
+
+- Visual review page for the review queue (merge/dismiss with side-by-side images)
+- Compare a learned model against the hand-tuned heuristic baseline
+- Add more sources (Facebook groups, smaller listing sites)
+- Consumer-facing search frontend
