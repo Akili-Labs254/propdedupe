@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}{{ p.title }} — {{ p.location }} | PropDeDupe{% endblock %}
+{% block description %}{{ p.title }} in {{ p.location }}. {{ p.price | price }}{% if p.bedrooms %}, {{ p.bedrooms }} bedrooms{% endif %}{% if p.bathrooms %}, {{ p.bathrooms | int }} bathrooms{% endif %}. Compare the original listings.{% endblock %}
+
+{% block head %}
+<link rel="canonical" href="/property/{{ p.slug }}">
+{% endblock %}
+
+{% block content %}
+<article class="property">
+  {% if p.image_url %}
+  <img class="hero" src="{{ p.image_url }}" alt="{{ p.title }}"
+       onerror="this.style.display='none'">
+  {% endif %}
+
+  <h1>{{ p.title }}</h1>
+  <p class="price-large">{{ p | price_range }}</p>
+  {% if p.price_min and p.price_max and p.price_min != p.price_max %}
+  <p class="hint">Sources list this property at different prices — see
+  the original listings below.</p>
+  {% endif %}
+
+  <table class="facts">
+    <tr><th>Location</th><td>{{ p.location or "—" }}</td></tr>
+    {% if p.bedrooms %}<tr><th>Bedrooms</th><td>{{ p.bedrooms }}</td></tr>{% endif %}
+    {% if p.bathrooms %}<tr><th>Bathrooms</th><td>{{ p.bathrooms | int }}</td></tr>{% endif %}
+    {% if p.size_sqm %}<tr><th>Size</th><td>{{ p.size_sqm | int }} m²</td></tr>{% endif %}
+    <tr><th>Found on</th><td>{{ p.source_count }} source site{{ "s" if p.source_count > 1 }}</td></tr>
+  </table>
+
+  <section class="sources">
+    <h2>View the original listing{{ "s" if sources | length > 1 }}</h2>
+    <p class="hint">Enquiries happen on the source site — we're the index,
+    they have the agent's details.</p>
+    {% for s in sources %}
+    <a class="source-link {{ 'inactive' if not s.active }}" href="{{ s.url }}"
+       rel="nofollow noopener" target="_blank">
+      <strong>{{ s.name }}</strong>
+      <span>{{ s.price | price }}</span>
+      {% if not s.active %}<span class="stale-note">may no longer be listed</span>{% endif %}
+    </a>
+    {% endfor %}
+  </section>
+</article>
+{% endblock %}

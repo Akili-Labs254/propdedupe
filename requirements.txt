@@ -7,6 +7,7 @@ supabase
 imagehash
 fastapi
 uvicorn[standard]
+jinja2
 
 # ── Planned (uncomment as we reach each stage) ──────────────────────────
 # rapidfuzz            # text similarity for matching titles

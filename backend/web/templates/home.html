@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="search-box">
+  <form method="get" action="/">
+    <input type="text" name="location" placeholder="Location (e.g. Kilimani)"
+           value="{{ filters.location }}">
+    <select name="bedrooms">
+      <option value="">Any beds</option>
+      {% for n in range(1, 7) %}
+      <option value="{{ n }}" {% if filters.bedrooms == n %}selected{% endif %}>{{ n }}+ bed</option>
+      {% endfor %}
+    </select>
+    <input type="number" name="min_price" placeholder="Min KSh"
+           value="{{ filters.min_price if filters.min_price is not none }}">
+    <input type="number" name="max_price" placeholder="Max KSh"
+           value="{{ filters.max_price if filters.max_price is not none }}">
+    <button type="submit">Search</button>
+  </form>
+</section>
+
+<p class="result-count">{{ "{:,}".format(total) }} properties</p>
+
+<section class="grid">
+  {% for prop in properties %}
+  <a class="card" href="/property/{{ prop.slug }}">
+    {% if prop.image_url %}
+    <img src="{{ prop.image_url }}" alt="{{ prop.title }}" loading="lazy"
+         onerror="this.style.display='none'">
+    {% endif %}
+    <div class="card-body">
+      <span class="price">{{ prop | price_range }}</span>
+      <h2>{{ prop.title }}</h2>
+      <p class="meta">
+        {% if prop.bedrooms %}{{ prop.bedrooms }} bed{% endif %}
+        {% if prop.bathrooms %} · {{ prop.bathrooms | int }} bath{% endif %}
+        {% if prop.size_sqm %} · {{ prop.size_sqm | int }} m²{% endif %}
+      </p>
+      <p class="location">{{ prop.location }}</p>
+      {% if prop.source_count > 1 %}
+      <span class="badge">Listed on {{ prop.source_count }} sites</span>
+      {% endif %}
+    </div>
+  </a>
+  {% else %}
+  <p>No properties match those filters. Try widening the search.</p>
+  {% endfor %}
+</section>
+
+{% if total_pages > 1 %}
+<nav class="pagination">
+  {% set qs = "&location=" ~ filters.location ~ (("&bedrooms=" ~ filters.bedrooms) if filters.bedrooms is not none else "") ~ (("&min_price=" ~ filters.min_price) if filters.min_price is not none else "") ~ (("&max_price=" ~ filters.max_price) if filters.max_price is not none else "") %}
+  {% if page > 1 %}<a href="/?page={{ page - 1 }}{{ qs }}">&larr; Previous</a>{% endif %}
+  <span>Page {{ page }} of {{ "{:,}".format(total_pages) }}</span>
+  {% if page < total_pages %}<a href="/?page={{ page + 1 }}{{ qs }}">Next &rarr;</a>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

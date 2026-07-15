@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}PropDeDupe — Nairobi property search, deduplicated{% endblock %}</title>
+  <meta name="description" content="{% block description %}Search every Nairobi property listing in one place — deduplicated across BuyRentKenya and Property24, with stale listings removed.{% endblock %}">
+  {% block head %}{% endblock %}
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="logo" href="/">PropDeDupe</a>
+    <span class="tagline">One search. Every source. No duplicates.</span>
+  </header>
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">
+    <p>PropDeDupe is a search index. Listings belong to their source
+    sites — we link you to the original advert to enquire.</p>
+  </footer>
+</body>
+</html>

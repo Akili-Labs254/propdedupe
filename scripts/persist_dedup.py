@@ -5,15 +5,22 @@ Runs the same blocking + scoring pipeline as run_scorer.py, then:
   Step 1: Cross-source — scores pairs, inserts matches, groups auto-merge
           pairs via Union-Find into properties, links member listings.
   Step 2: Intra-P24 — collapses cluster_key duplicate groups into properties.
-  Step 3: Singletons — run via SQL in Supabase SQL Editor (see bottom of file).
+  Step 3: Singletons — every still-unlinked listing becomes its own property
+          (previously manual SQL, now automated below).
 
 Run: caffeinate -i python -u -m scripts.persist_dedup 2>&1 | tee data/persist_dedup.log
 Re-runnable: clears previous results before inserting.
 """
+import sys
+import time
 from typing import Dict, List, Set, Optional
 from collections import defaultdict
+
+import httpx
+
 from backend.db.client import get_client
 from backend.dedup.scorer import score_pair
+from backend.dedup.slugs import SlugAllocator
 from scripts.cross_source_match import (
     fetch_distinct_hashes,
     find_cross_matches,
@@ -30,8 +37,9 @@ def fetch_listing_details(db, ids: List[int]) -> Dict[int, dict]:
         chunk = ids[i:i + 100]
         result = (
             db.table("listings")
-            .select("id, source_id, title, price, bedrooms, baths, "
-                    "location, size_sqm, image_url")
+            .select("id, source_id, source_listing_id, status, first_seen, "
+                    "title, price, bedrooms, baths, location, size_sqm, "
+                    "image_url")
             .in_("id", chunk)
             .execute()
         )
@@ -136,8 +144,164 @@ def clear_previous_results(db):
     print("  Done — tables cleared.")
 
 
+def snapshot_slug_state(db) -> Dict[int, str]:
+    """Capture {listing_id: current slug} BEFORE the rebuild clears
+    everything — this is what lets slugs survive the rebuild."""
+    pid_to_slug = {}
+    offset = 0
+    while True:
+        batch = (db.table("properties").select("id, slug")
+                 .not_.is_("slug", "null")
+                 .order("id").range(offset, offset + 999).execute())
+        if not batch.data:
+            break
+        for row in batch.data:
+            pid_to_slug[row["id"]] = row["slug"]
+        if len(batch.data) < 1000:
+            break
+        offset += 1000
+
+    snapshot = {}
+    offset = 0
+    while True:
+        batch = (db.table("listings").select("id, property_id")
+                 .not_.is_("property_id", "null")
+                 .order("id").range(offset, offset + 999).execute())
+        if not batch.data:
+            break
+        for row in batch.data:
+            slug = pid_to_slug.get(row["property_id"])
+            if slug:
+                snapshot[row["id"]] = slug
+        if len(batch.data) < 1000:
+            break
+        offset += 1000
+    return snapshot
+
+
+def property_status(member_rows: List[dict]) -> str:
+    """active if ANY member listing is still active, else inactive."""
+    return "active" if any(r.get("status") == "active" for r in member_rows) \
+        else "inactive"
+
+
+def earliest_first_seen(member_rows: List[dict]):
+    """Property crawl stamp = when its earliest member was first scraped.
+    ISO-8601 strings in a uniform format compare correctly as strings."""
+    vals = [r.get("first_seen") for r in member_rows if r.get("first_seen")]
+    return min(vals) if vals else None
+
+
+def price_range(member_rows: List[dict]) -> dict:
+    """Min/max price across member listings — sources sometimes disagree
+    on price, and the range is information only an aggregator has."""
+    prices = [float(r["price"]) for r in member_rows if r.get("price")]
+    if not prices:
+        return {"price_min": None, "price_max": None}
+    return {"price_min": min(prices), "price_max": max(prices)}
+
+
+def link_batch(db, pairs: List[dict]):
+    """Bulk listing→property linking via the link_listings RPC
+    (one round-trip per chunk instead of one per listing)."""
+    for i in range(0, len(pairs), 500):
+        chunk = pairs[i:i + 500]
+        _with_retry(lambda c=chunk: db.rpc("link_listings", {"pairs": c}).execute())
+
+
+def _with_retry(make_call, attempts=4):
+    """Run a Supabase call, retrying on transient network errors.
+
+    Supabase's proxy closes an HTTP/2 connection after ~10k requests
+    (GOAWAY); the in-flight request dies with RemoteProtocolError. The
+    next attempt opens a fresh connection, so a plain retry with
+    backoff fixes it. make_call must BUILD AND EXECUTE the request
+    (a lambda), so each retry issues a fresh request.
+    """
+    for attempt in range(attempts):
+        try:
+            return make_call()
+        except (httpx.HTTPError, ConnectionError) as e:
+            if attempt == attempts - 1:
+                raise
+            wait = 2 ** attempt
+            print(f"  transient network error ({type(e).__name__}), "
+                  f"retrying in {wait}s...")
+            time.sleep(wait)
+
+
+def create_singleton_properties(db, alloc: SlugAllocator,
+                                prop_members: Optional[Dict[int, List[int]]] = None) -> int:
+    """Step 3: give every still-unlinked listing its own property row.
+
+    Paginates through property_id IS NULL listings, inserts property rows
+    in batches (with slug + status), then bulk-links via the
+    link_listings RPC. Supabase returns inserted rows in payload order,
+    so index i of the insert result corresponds to index i of the batch.
+    """
+    BATCH_SIZE = 100
+    created = 0
+
+    while True:
+        # Always fetch offset 0: linking removes rows from this filter,
+        # so the next "first page" is always the next unprocessed batch.
+        batch = _with_retry(lambda: (
+            db.table("listings")
+            .select("id, source_id, source_listing_id, status, first_seen, "
+                    "title, price, location, bedrooms, baths, size_sqm, "
+                    "image_url")
+            .is_("property_id", "null")
+            .order("id")
+            .range(0, BATCH_SIZE - 1)
+            .execute()))
+        if not batch.data:
+            break
+
+        prop_rows = []
+        for row in batch.data:
+            prop_rows.append({
+                "title": row.get("title"),
+                "price": float(row["price"]) if row.get("price") else None,
+                "location": row.get("location"),
+                "bedrooms": row.get("bedrooms"),
+                "bathrooms": float(row["baths"]) if row.get("baths") else None,
+                "size_sqm": float(row["size_sqm"]) if row.get("size_sqm") else None,
+                "image_url": row.get("image_url"),
+                "source_count": 1,
+                "slug": alloc.slug_for([row]),
+                "status": property_status([row]),
+                "first_seen": row.get("first_seen"),
+                **price_range([row]),
+            })
+
+        result = _with_retry(
+            lambda: db.table("properties").insert(prop_rows).execute())
+
+        pairs = []
+        for listing_row, prop_row in zip(batch.data, result.data):
+            pairs.append({"listing_id": listing_row["id"],
+                          "property_id": prop_row["id"]})
+            if prop_members is not None:
+                prop_members[prop_row["id"]] = [listing_row["id"]]
+        link_batch(db, pairs)
+
+        created += len(batch.data)
+        if created % 1000 == 0:
+            print(f"  {created} singletons done...")
+
+    return created
+
+
 def main():
     db = get_client()
+
+    # Snapshot slug state BEFORE clearing — rebuilt properties inherit
+    # the slugs their member listings carried (stable public URLs).
+    print("Snapshotting slug state...")
+    snapshot = snapshot_slug_state(db)
+    print(f"  {len(snapshot)} listings carry a slug from the previous build")
+    alloc = SlugAllocator(snapshot)
+    prop_members: Dict[int, List[int]] = {}  # new property_id → member ids
 
     clear_previous_results(db)
 
@@ -155,6 +319,32 @@ def main():
     for _, _, _, brk_ids, p24_ids in matches:
         all_ids.update(brk_ids)
         all_ids.update(p24_ids)
+
+    # ── Manual review decisions (durable; reapplied every rebuild) ─
+    print("Fetching review decisions...")
+    decisions = {}
+    offset = 0
+    while True:
+        batch = (db.table("review_decisions")
+                 .select("listing_a_id, listing_b_id, decision")
+                 .order("listing_a_id")
+                 .range(offset, offset + 999)
+                 .execute())
+        if not batch.data:
+            break
+        for row in batch.data:
+            decisions[(row["listing_a_id"], row["listing_b_id"])] = row["decision"]
+        if len(batch.data) < 1000:
+            break
+        offset += 1000
+    print(f"  {len(decisions)} stored decisions")
+
+    # Merge-decision listings need details even if blocking didn't
+    # surface them as candidates this run
+    for (a, b), d in decisions.items():
+        if d == "merge":
+            all_ids.add(a)
+            all_ids.add(b)
 
     print(f"Fetching details for {len(all_ids)} listings...")
     details = fetch_listing_details(db, list(all_ids))
@@ -188,6 +378,13 @@ def main():
             "tier": tier,
             "signals": signals,
         })
+
+    # Human decisions override the scorer: a dismissed pair is never
+    # auto-merged (even at a high score), a merged pair always groups.
+    for s in scored:
+        key = (min(s["brk_rep"], s["p24_rep"]), max(s["brk_rep"], s["p24_rep"]))
+        if key in decisions:
+            s["tier"] = "merged" if decisions[key] == "merge" else "dismissed"
 
     # Count tiers
     tier_counts = {}
@@ -223,7 +420,8 @@ def main():
 
     # ── Step 1b: Group auto-merge pairs into properties ──────────
     uf = UnionFind()
-    auto_merge_pairs = [s for s in scored if s["tier"] == "auto-merge"]
+    auto_merge_pairs = [s for s in scored
+                        if s["tier"] in ("auto-merge", "merged")]
 
     for s in auto_merge_pairs:
         # Link all IDs in this pair together
@@ -232,6 +430,15 @@ def main():
         for lid in all_pair_ids[1:]:
             uf.union(first, lid)
 
+    # Merge decisions whose pairs weren't candidates this run still apply
+    candidate_keys = {
+        (min(s["brk_rep"], s["p24_rep"]), max(s["brk_rep"], s["p24_rep"]))
+        for s in scored
+    }
+    for (a, b), d in decisions.items():
+        if d == "merge" and (a, b) not in candidate_keys:
+            uf.union(a, b)
+
     groups = uf.groups()
     print(f"\n{len(groups)} property groups from {len(auto_merge_pairs)} auto-merge pairs")
 
@@ -239,18 +446,19 @@ def main():
     print("Creating properties and linking listings...")
     step1_created = 0
 
+    step1_pairs = []
     for root_id, member_ids in groups.items():
         primary = pick_primary(member_ids, details)
         if not primary:
             print(f"  WARNING: no details for group {member_ids}, skipping")
             continue
 
+        member_rows = [details[lid] for lid in member_ids if lid in details]
+
         # Count distinct sources in this group
         source_ids = set()
-        for lid in member_ids:
-            row = details.get(lid)
-            if row:
-                source_ids.add(row.get("source_id"))
+        for row in member_rows:
+            source_ids.add(row.get("source_id"))
 
         # Insert property row
         prop_data = {
@@ -262,18 +470,23 @@ def main():
             "size_sqm": float(primary["size_sqm"]) if primary.get("size_sqm") else None,
             "image_url": primary.get("image_url"),
             "source_count": len(source_ids),
+            "slug": alloc.slug_for(member_rows or [{"id": member_ids[0]}]),
+            "status": property_status(member_rows),
+            "first_seen": earliest_first_seen(member_rows),
+            **price_range(member_rows),
         }
-        result = db.table("properties").insert(prop_data).execute()
+        result = _with_retry(
+            lambda pd=prop_data: db.table("properties").insert(pd).execute())
         property_id = result.data[0]["id"]
 
-        # Link all member listings to this property
+        # Queue member listings for bulk linking
         for lid in member_ids:
-            db.table("listings") \
-                .update({"property_id": property_id}) \
-                .eq("id", lid) \
-                .execute()
+            step1_pairs.append({"listing_id": lid, "property_id": property_id})
+        prop_members[property_id] = list(member_ids)
 
         step1_created += 1
+
+    link_batch(db, step1_pairs)
 
     print(f"  Created {step1_created} properties, linked {sum(len(v) for v in groups.values())} listings.")
 
@@ -286,7 +499,10 @@ def main():
     BATCH_SIZE = 1000
     while True:
         batch = (db.table("listings")
-                 .select("id, cluster_key, property_id, title, price, location, bedrooms, baths, size_sqm, image_url")
+                 .select("id, cluster_key, property_id, source_id, "
+                         "source_listing_id, status, first_seen, title, "
+                         "price, location, bedrooms, baths, size_sqm, "
+                         "image_url")
                  .eq("source_id", 2)
                  .not_.is_("cluster_key", "null")
                  .order("id")
@@ -325,12 +541,15 @@ def main():
             # Link unlinked members in one call
             unlinked_ids = [m["id"] for m in members if m["property_id"] is None]
             if unlinked_ids:
-                db.table("listings") \
-                    .update({"property_id": existing_pid}) \
-                    .in_("id", unlinked_ids) \
-                    .execute()
+                _with_retry(lambda ids=unlinked_ids, pid=existing_pid: (
+                    db.table("listings")
+                    .update({"property_id": pid})
+                    .in_("id", ids)
+                    .execute()))
                 step2_linked += len(unlinked_ids)
                 step2_joined += len(unlinked_ids)
+            prop_members.setdefault(existing_pid, []).extend(
+                m["id"] for m in members)
         else:
             # Create a new property from the first member
             rep = members[0]
@@ -343,32 +562,101 @@ def main():
                 "size_sqm": float(rep["size_sqm"]) if rep.get("size_sqm") else None,
                 "image_url": rep.get("image_url"),
                 "source_count": 1,
+                "slug": alloc.slug_for(members),
+                "status": property_status(members),
+                "first_seen": earliest_first_seen(members),
+                **price_range(members),
             }
-            result = db.table("properties").insert(prop_data).execute()
+            result = _with_retry(
+                lambda pd=prop_data: db.table("properties").insert(pd).execute())
             pid = result.data[0]["id"]
             step2_created += 1
 
             # Link all members in one call
             member_ids = [m["id"] for m in members]
-            db.table("listings") \
-                .update({"property_id": pid}) \
-                .in_("id", member_ids) \
-                .execute()
+            prop_members[pid] = list(member_ids)
+            _with_retry(lambda ids=member_ids, p=pid: (
+                db.table("listings")
+                .update({"property_id": p})
+                .in_("id", ids)
+                .execute()))
             step2_linked += len(members)
 
     print(f"  Created {step2_created} new properties")
     print(f"  Linked {step2_linked} listings ({step2_joined} joined existing cross-source properties)")
 
+    # ── Step 3: Singletons ───────────────────────────────────────
+    print("\n--- Step 3: Singleton properties ---")
+    step3_created = create_singleton_properties(db, alloc, prop_members)
+    print(f"  Created {step3_created} singleton properties")
+
+    # ── Step 4: Retired-slug redirects ───────────────────────────
+    # Old slugs nobody inherited 301-redirect to wherever their former
+    # member listings ended up (slug → slug, survives future rebuilds).
+    print("\n--- Step 4: Retired-slug redirects ---")
+    listing_to_new = {lid: pid for pid, lids in prop_members.items()
+                      for lid in lids}
+    retired = alloc.compute_retired(listing_to_new)
+
+    if retired:
+        # Map target property ids → their canonical slugs
+        target_pids = list(set(retired.values()))
+        pid_to_slug = {}
+        for i in range(0, len(target_pids), 100):
+            chunk = target_pids[i:i + 100]
+            res = _with_retry(lambda c=chunk: (
+                db.table("properties").select("id, slug")
+                .in_("id", c).execute()))
+            for row in res.data:
+                pid_to_slug[row["id"]] = row["slug"]
+
+        redirect_rows = [
+            {"slug": old, "target_slug": pid_to_slug[pid]}
+            for old, pid in retired.items()
+            if pid in pid_to_slug and pid_to_slug[pid] != old
+        ]
+        for i in range(0, len(redirect_rows), 500):
+            chunk = redirect_rows[i:i + 500]
+            _with_retry(lambda c=chunk: (
+                db.table("property_slugs")
+                .upsert(c, on_conflict="slug").execute()))
+        print(f"  {len(redirect_rows)} retired slugs now redirect")
+    else:
+        print("  none (first run, or no regroupings)")
+
     # ── Summary ──────────────────────────────────────────────────
-    print(f"\n=== Done (Steps 1 + 2) ===")
+    print(f"\n=== Done (Steps 1 + 2 + 3) ===")
     print(f"  Matches inserted: {len(match_rows)}")
     print(f"  Step 1 — Cross-source properties: {step1_created}")
     print(f"  Step 2 — Cluster properties: {step2_created} ({step2_joined} listings joined existing)")
-    print(f"  Total properties so far: {step1_created + step2_created}")
+    print(f"  Step 3 — Singleton properties: {step3_created}")
+    print(f"  Total properties: {step1_created + step2_created + step3_created}")
     print(f"  Tiers: {tier_counts}")
 
 
 
 if __name__ == "__main__":
-    main()
+    if "--singletons-only" in sys.argv:
+        # Resume mode: only create/link singleton properties. Picks up
+        # exactly where a crashed run stopped (works off property_id IS
+        # NULL), touching nothing already linked. Pre-claims every slug
+        # already in the DB so generated slugs can't collide; the
+        # pre-crash snapshot is gone, so no inheritance in this mode.
+        db = get_client()
+        alloc = SlugAllocator({})
+        offset = 0
+        while True:
+            batch = (db.table("properties").select("slug")
+                     .not_.is_("slug", "null")
+                     .order("id").range(offset, offset + 999).execute())
+            if not batch.data:
+                break
+            alloc._claimed.update(r["slug"] for r in batch.data)
+            if len(batch.data) < 1000:
+                break
+            offset += 1000
+        n = create_singleton_properties(db, alloc)
+        print(f"Created {n} singleton properties.")
+    else:
+        main()
 

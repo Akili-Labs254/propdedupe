@@ -184,6 +184,16 @@ def normalize_suburb(raw: str) -> str:
     # Apply alias mapping
     name = _ALIASES.get(name, name)
 
+    # Step 5 (was documented above but never implemented): if the name
+    # isn't a known suburb, check whether one is its PREFIX — catches
+    # street/estate-level locations like "Lavington Elmolo Drive" →
+    # "lavington" without needing an alias per street. Longest suburb
+    # first so "lower kabete ..." matches "lower kabete", not "kabete".
+    if name not in ADJACENCY:
+        for suburb in sorted(ADJACENCY, key=len, reverse=True):
+            if name.startswith(suburb + " "):
+                return suburb
+
     return name
 
 
