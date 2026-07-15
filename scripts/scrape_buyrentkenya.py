@@ -27,6 +27,7 @@ def run(max_pages: Optional[int] = None, category: str = "sale") -> int:
     scraper = BuyRentKenyaScraper()
     saved = 0
     empty_streak = 0
+    fail_streak = 0
     cap = min(max_pages, HARD_PAGE_CAP) if max_pages else HARD_PAGE_CAP
 
     for page in range(1, cap + 1):
@@ -36,8 +37,15 @@ def run(max_pages: Optional[int] = None, category: str = "sale") -> int:
         try:
             html = scraper.fetch(url)
             listings = scraper.parse(html)
+            fail_streak = 0
         except Exception as e:
-            print(f"  Failed: {e}, skipping...")
+            # BRK 404s past the last page (it does NOT serve an empty
+            # page), so consecutive failures = end of pagination.
+            fail_streak += 1
+            print(f"  Failed: {e} (fail streak {fail_streak})")
+            if fail_streak >= 3:
+                print(f"[BRK/{category}] {fail_streak} failures in a row — done.")
+                break
             continue
 
         if not listings:
