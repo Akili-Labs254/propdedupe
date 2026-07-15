@@ -21,6 +21,7 @@ import httpx
 from backend.db.client import get_client
 from backend.dedup.scorer import score_pair
 from backend.dedup.slugs import SlugAllocator
+from backend.dedup.adjacency import normalize_suburb
 from scripts.cross_source_match import (
     fetch_distinct_hashes,
     find_cross_matches,
@@ -38,8 +39,8 @@ def fetch_listing_details(db, ids: List[int]) -> Dict[int, dict]:
         result = (
             db.table("listings")
             .select("id, source_id, source_listing_id, status, first_seen, "
-                    "title, price, bedrooms, baths, location, size_sqm, "
-                    "image_url")
+                    "cluster_key, category, title, price, bedrooms, baths, "
+                    "location, size_sqm, image_url")
             .in_("id", chunk)
             .execute()
         )
@@ -185,6 +186,12 @@ def property_status(member_rows: List[dict]) -> str:
         else "inactive"
 
 
+def suburb_of(row: dict):
+    """Canonical suburb for segment pages; None when location missing."""
+    loc = row.get("location")
+    return normalize_suburb(loc) if loc else None
+
+
 def earliest_first_seen(member_rows: List[dict]):
     """Property crawl stamp = when its earliest member was first scraped.
     ISO-8601 strings in a uniform format compare correctly as strings."""
@@ -248,8 +255,8 @@ def create_singleton_properties(db, alloc: SlugAllocator,
         batch = _with_retry(lambda: (
             db.table("listings")
             .select("id, source_id, source_listing_id, status, first_seen, "
-                    "title, price, location, bedrooms, baths, size_sqm, "
-                    "image_url")
+                    "category, title, price, location, bedrooms, baths, "
+                    "size_sqm, image_url")
             .is_("property_id", "null")
             .order("id")
             .range(0, BATCH_SIZE - 1)
@@ -271,6 +278,8 @@ def create_singleton_properties(db, alloc: SlugAllocator,
                 "slug": alloc.slug_for([row]),
                 "status": property_status([row]),
                 "first_seen": row.get("first_seen"),
+                "suburb": suburb_of(row),
+                "category": row.get("category") or "sale",
                 **price_range([row]),
             })
 
@@ -306,12 +315,18 @@ def main():
     clear_previous_results(db)
 
     # ── Run the pipeline (same as run_scorer.py) ─────────────────
+    # Blocking is partitioned by category: sale and rent never match.
     print("\nFetching hashes...")
-    brk_hashes = fetch_distinct_hashes(db, 1)
-    p24_hashes = fetch_distinct_hashes(db, 2)
-
-    print("Finding candidates (threshold <= 8)...")
-    matches = find_cross_matches(brk_hashes, p24_hashes, threshold=8)
+    hashes_by_cat = {}
+    matches = []
+    for cat in ("sale", "rent"):
+        bh = fetch_distinct_hashes(db, 1, category=cat)
+        ph = fetch_distinct_hashes(db, 2, category=cat)
+        hashes_by_cat[cat] = (bh, ph)
+        if bh and ph:
+            print(f"  [{cat}] {len(bh)} BRK x {len(ph)} P24 triples — "
+                  "finding candidates (threshold <= 8)...")
+            matches += find_cross_matches(bh, ph, threshold=8)
     print(f"  {len(matches)} candidate pairs")
 
     # Collect all listing IDs
@@ -410,6 +425,7 @@ def main():
             "beds_score": round(s["signals"]["bedrooms"], 2),
             "baths_score": round(s["signals"]["baths"], 2),
             "location_score": round(s["signals"]["location"], 2),
+            "scope": "cross",
         })
 
     # Batch insert in chunks (Supabase payload size limit)
@@ -417,6 +433,89 @@ def main():
         chunk = match_rows[i:i + 50]
         db.table("matches").insert(chunk).execute()
     print(f"  Inserted {len(match_rows)} match rows.")
+
+    # ── Step 1.5: Intra-source pairs ─────────────────────────────
+    # Same site, same image content, different listing rows (re-uploads
+    # cluster_key misses). Auto-merge policy set by measured precision
+    # (2026-07-15, ~70-pair hand-audit): score <= 0.10 was 100% true
+    # duplicates; false positives only appeared from ~0.15 up and all
+    # carried loc >= 0.5 (which score_pair's location gate already
+    # demotes). So: auto-merge only below INTRA_AUTO_CUT, everything
+    # else in [cut, review-threshold) stays human-reviewed.
+    INTRA_AUTO_CUT = 0.10
+    print("\n--- Step 1.5: Intra-source candidates ---")
+    from scripts.intra_source_match import find_intra_matches
+
+    intra_rows = []
+    intra_tiers = {}
+    intra_auto_groups = []   # [(ids_a, ids_b)] to union into properties
+    intra_jobs = []
+    for cat, (bh, ph) in hashes_by_cat.items():
+        intra_jobs.append((1, f"BRK/{cat}", bh))
+        intra_jobs.append((2, f"P24/{cat}", ph))
+    for sid, name, hashes in intra_jobs:
+        if not hashes:
+            continue
+        cands = find_intra_matches(hashes)
+        print(f"  {name}: {len(cands)} raw candidate pairs")
+
+        need = set()
+        for _, ids_a, ids_b in cands:
+            need.add(ids_a[0])
+            need.add(ids_b[0])
+        missing = [i for i in need if i not in details]
+        if missing:
+            details.update(fetch_listing_details(db, missing))
+
+        for dist, ids_a, ids_b in cands:
+            ra, rb = details.get(ids_a[0]), details.get(ids_b[0])
+            if not ra or not rb:
+                continue
+            # Same cluster_key → step 2 already collapses this pair
+            if ra.get("cluster_key") and \
+                    ra.get("cluster_key") == rb.get("cluster_key"):
+                continue
+
+            total, tier, signals = score_pair(
+                phash_distance=dist,
+                price_a=float(ra["price"]) if ra.get("price") else None,
+                price_b=float(rb["price"]) if rb.get("price") else None,
+                beds_a=ra.get("bedrooms"),
+                beds_b=rb.get("bedrooms"),
+                baths_a=float(ra["baths"]) if ra.get("baths") else None,
+                baths_b=float(rb["baths"]) if rb.get("baths") else None,
+                location_a=ra.get("location"),
+                location_b=rb.get("location"),
+            )
+
+            key = (min(ids_a[0], ids_b[0]), max(ids_a[0], ids_b[0]))
+            if key in decisions:
+                tier = "merged" if decisions[key] == "merge" else "dismissed"
+            elif tier == "auto-merge" and total > INTRA_AUTO_CUT:
+                tier = "review"  # measured precision drops above the cut
+
+            if tier in ("auto-merge", "merged"):
+                intra_auto_groups.append((list(ids_a), list(ids_b)))
+
+            intra_tiers[tier] = intra_tiers.get(tier, 0) + 1
+            intra_rows.append({
+                "listing_a_id": key[0],
+                "listing_b_id": key[1],
+                "score": round(total, 4),
+                "tier": tier,
+                "image_score": round(signals["image"], 2),
+                "price_score": round(signals["price"], 2),
+                "beds_score": round(signals["bedrooms"], 2),
+                "baths_score": round(signals["baths"], 2),
+                "location_score": round(signals["location"], 2),
+                "scope": "intra",
+            })
+
+    for i in range(0, len(intra_rows), 50):
+        chunk = intra_rows[i:i + 50]
+        _with_retry(lambda c=chunk: db.table("matches").insert(c).execute())
+    print(f"  Inserted {len(intra_rows)} intra-source match rows. "
+          f"Tiers: {intra_tiers}")
 
     # ── Step 1b: Group auto-merge pairs into properties ──────────
     uf = UnionFind()
@@ -428,6 +527,15 @@ def main():
         all_pair_ids = s["brk_ids"] + s["p24_ids"]
         first = all_pair_ids[0]
         for lid in all_pair_ids[1:]:
+            uf.union(first, lid)
+
+    # Intra-source auto-merges (score <= INTRA_AUTO_CUT) and reapplied
+    # manual merges join the same union-find, so a listing that matches
+    # cross-source AND intra-source lands in ONE property
+    for ids_a, ids_b in intra_auto_groups:
+        all_ids_pair = ids_a + ids_b
+        first = all_ids_pair[0]
+        for lid in all_ids_pair[1:]:
             uf.union(first, lid)
 
     # Merge decisions whose pairs weren't candidates this run still apply
@@ -473,6 +581,8 @@ def main():
             "slug": alloc.slug_for(member_rows or [{"id": member_ids[0]}]),
             "status": property_status(member_rows),
             "first_seen": earliest_first_seen(member_rows),
+            "suburb": suburb_of(primary),
+            "category": primary.get("category") or "sale",
             **price_range(member_rows),
         }
         result = _with_retry(
@@ -500,8 +610,8 @@ def main():
     while True:
         batch = (db.table("listings")
                  .select("id, cluster_key, property_id, source_id, "
-                         "source_listing_id, status, first_seen, title, "
-                         "price, location, bedrooms, baths, size_sqm, "
+                         "source_listing_id, status, first_seen, category, "
+                         "title, price, location, bedrooms, baths, size_sqm, "
                          "image_url")
                  .eq("source_id", 2)
                  .not_.is_("cluster_key", "null")
@@ -517,10 +627,12 @@ def main():
 
     print(f"  Fetched {len(all_p24)} P24 listings with cluster_key")
 
-    # Group by cluster_key in Python
+    # Group by (cluster_key, category) in Python — the category part is
+    # belt-and-braces (identical price across sale/rent is ~impossible,
+    # but the partition rule is absolute)
     clusters = defaultdict(list)
     for listing in all_p24:
-        clusters[listing["cluster_key"]].append(listing)
+        clusters[(listing["cluster_key"], listing.get("category"))].append(listing)
 
     multi_clusters = {k: v for k, v in clusters.items() if len(v) > 1}
     print(f"  {len(multi_clusters)} clusters with >1 listing")
@@ -565,6 +677,8 @@ def main():
                 "slug": alloc.slug_for(members),
                 "status": property_status(members),
                 "first_seen": earliest_first_seen(members),
+                "suburb": suburb_of(rep),
+                "category": rep.get("category") or "sale",
                 **price_range(members),
             }
             result = _with_retry(

@@ -13,12 +13,13 @@ def compute_cluster_key(listing) -> str:
     joined = "|".join(parts)
     return hashlib.md5(joined.encode()).hexdigest()
 
-def save_listings(listings: list, source_id: int) -> None:
+def save_listings(listings: list, source_id: int, category: str = "sale") -> None:
     db = get_client()
     rows = []
     for listing in listings:
         rows.append({
             "source_id": source_id,
+            "category": category,
             "source_listing_id": listing.source_listing_id,
             "url": listing.url,
             "title": listing.title,

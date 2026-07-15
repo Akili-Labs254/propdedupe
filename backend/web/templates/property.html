@@ -5,6 +5,26 @@
 
 {% block head %}
 <link rel="canonical" href="/property/{{ p.slug }}">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "RealEstateListing",
+  "name": {{ p.title | tojson }},
+  "url": "/property/{{ p.slug }}",
+  {% if p.image_url %}"image": {{ p.image_url | tojson }},{% endif %}
+  {% if p.price %}"offers": {
+    "@type": "Offer",
+    "price": {{ p.price | int }},
+    "priceCurrency": "KES"
+  },{% endif %}
+  "address": {
+    "@type": "PostalAddress",
+    "addressLocality": {{ (p.location or "Nairobi") | tojson }},
+    "addressRegion": "Nairobi",
+    "addressCountry": "KE"
+  }
+}
+</script>
 {% endblock %}
 
 {% block content %}

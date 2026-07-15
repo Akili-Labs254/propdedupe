@@ -32,17 +32,25 @@ def _record_decision(db, match: dict, decision: str):
 def list_review_pairs(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
+    scope: Optional[str] = Query(None, description="'cross' or 'intra'"),
 ):
     """List match pairs in the review queue — pairs the scorer flagged as
     possibly the same property but wasn't confident enough to auto-merge."""
     db = get_client()
+    return fetch_review_page(db, page, per_page, scope)
 
-    # Fetch review-tier matches with pagination
+
+def fetch_review_page(db, page: int, per_page: int,
+                      scope: Optional[str] = None) -> dict:
+    """Review-tier matches enriched with both listings' details.
+    Shared by the JSON API and the admin HTML page."""
     offset = (page - 1) * per_page
-    result = (db.table("matches")
-              .select("*", count="exact")
-              .eq("tier", "review")
-              .order("score")
+    query = (db.table("matches")
+             .select("*", count="exact")
+             .eq("tier", "review"))
+    if scope in ("cross", "intra"):
+        query = query.eq("scope", scope)
+    result = (query.order("score")
               .range(offset, offset + per_page - 1)
               .execute())
 
@@ -57,7 +65,7 @@ def list_review_pairs(
     if listing_ids:
         rows = (db.table("listings")
                 .select("id, source_id, title, price, location, bedrooms, "
-                        "baths, image_url, url")
+                        "baths, image_url, url, status")
                 .in_("id", list(listing_ids))
                 .execute())
         for row in rows.data:
@@ -160,7 +168,12 @@ def merge_pair(match_id: int, x_admin_key: Optional[str] = Header(None)):
     delete property B, mark the match as resolved."""
     _require_admin(x_admin_key)
     db = get_client()
+    return do_merge(db, match_id)
 
+
+def do_merge(db, match_id: int) -> dict:
+    """Core merge logic — shared by the JSON API and the admin page.
+    Caller is responsible for auth."""
     # Fetch the match
     match = (db.table("matches")
              .select("*")
@@ -238,7 +251,12 @@ def dismiss_pair(match_id: int, x_admin_key: Optional[str] = Header(None)):
     """Dismiss a review pair — mark as not a match so it won't reappear."""
     _require_admin(x_admin_key)
     db = get_client()
+    return do_dismiss(db, match_id)
 
+
+def do_dismiss(db, match_id: int) -> dict:
+    """Core dismiss logic — shared by the JSON API and the admin page.
+    Caller is responsible for auth."""
     match = (db.table("matches")
              .select("*")
              .eq("id", match_id)

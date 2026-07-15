@@ -27,6 +27,7 @@ create table if not exists property_slugs (
     updated_at  timestamptz not null default now()
 );
 alter table property_slugs enable row level security;
+grant select, insert, update, delete on property_slugs to service_role;
 
 -- ── 3. bulk listing→property linking ─────────────────────────────────
 -- One RPC call links a whole batch (vs one REST round-trip per listing,

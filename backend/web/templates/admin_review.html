@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Review queue ({{ total }}) | PropDeDupe admin{% endblock %}
+
+{% block head %}<meta name="robots" content="noindex">{% endblock %}
+
+{% block content %}
+<h1>Review queue</h1>
+<p class="intro">{{ "{:,}".format(total) }} pairs waiting.
+  Filter:
+  <a href="/admin/review?key={{ key }}">all</a> ·
+  <a href="/admin/review?key={{ key }}&scope=cross">cross-source</a> ·
+  <a href="/admin/review?key={{ key }}&scope=intra">intra-source</a>
+  {% if scope %}(showing {{ scope }}){% endif %}
+</p>
+
+{% for m in matches %}
+<div class="pair">
+  <div class="pair-listings">
+    {% for l in [m.listing_a, m.listing_b] %}
+    <div class="pair-card">
+      {% if l %}
+      {% if l.image_url %}
+      <img src="{{ l.image_url }}" loading="lazy" onerror="this.style.display='none'">
+      {% endif %}
+      <strong>{{ l.title }}</strong>
+      <p class="meta">{{ source_names.get(l.source_id, "?") }}
+        {% if l.status != "active" %}<em>({{ l.status }})</em>{% endif %}</p>
+      <p class="meta">{{ l.price | price }}
+        {% if l.bedrooms %} · {{ l.bedrooms }} bed{% endif %}
+        {% if l.baths %} · {{ l.baths | int }} bath{% endif %}</p>
+      <p class="meta">{{ l.location }}</p>
+      <a href="{{ l.url }}" target="_blank" rel="noopener">source ↗</a>
+      {% else %}<em>listing missing</em>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  <div class="pair-actions">
+    <p class="meta">score {{ "%.3f" | format(m.score) }} ({{ m.scope }}) —
+      img {{ m.image_score }} · price {{ m.price_score }} ·
+      beds {{ m.beds_score }} · loc {{ m.location_score }}</p>
+    <form method="post" action="/admin/review/{{ m.id }}/merge">
+      <input type="hidden" name="key" value="{{ key }}">
+      <input type="hidden" name="scope" value="{{ scope }}">
+      <input type="hidden" name="page" value="{{ page }}">
+      <button class="btn-merge">Merge — same property</button>
+    </form>
+    <form method="post" action="/admin/review/{{ m.id }}/dismiss">
+      <input type="hidden" name="key" value="{{ key }}">
+      <input type="hidden" name="scope" value="{{ scope }}">
+      <input type="hidden" name="page" value="{{ page }}">
+      <button class="btn-dismiss">Dismiss — different</button>
+    </form>
+  </div>
+</div>
+{% else %}
+<p>Queue empty. Nice.</p>
+{% endfor %}
+
+{% if total_pages > 1 %}
+<nav class="pagination">
+  {% if page > 1 %}<a href="/admin/review?key={{ key }}&page={{ page - 1 }}{% if scope %}&scope={{ scope }}{% endif %}">&larr; Previous</a>{% endif %}
+  <span>Page {{ page }} of {{ total_pages }}</span>
+  {% if page < total_pages %}<a href="/admin/review?key={{ key }}&page={{ page + 1 }}{% if scope %}&scope={{ scope }}{% endif %}">Next &rarr;</a>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

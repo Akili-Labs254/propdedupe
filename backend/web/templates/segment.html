@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% from "_macros.html" import property_card, pagination %}
+
+{% set page_title = (bedrooms ~ " Bedroom Houses" if bedrooms else "Houses") ~ " for Sale in " ~ suburb_name %}
+{% set base_path = "/houses-for-sale/" ~ suburb ~ ("/" ~ bedrooms ~ "-bedroom" if bedrooms else "") %}
+
+{% block title %}{{ page_title }} — {{ stats.property_count }} available | PropDeDupe{% endblock %}
+{% block description %}{{ stats.property_count }} {{ page_title | lower }}{% if stats.min_price %}, from {{ stats.min_price | price }}{% if stats.median_price %} (median {{ stats.median_price | price }}){% endif %}{% endif %}. Deduplicated across every listing site, stale adverts removed.{% endblock %}
+
+{% block head %}
+<link rel="canonical" href="{{ base_path }}">
+{% endblock %}
+
+{% block content %}
+<nav class="crumbs">
+  <a href="/houses-for-sale">Nairobi suburbs</a>
+  {% if bedrooms %} › <a href="/houses-for-sale/{{ suburb }}">{{ suburb_name }}</a>{% endif %}
+</nav>
+
+<h1>{{ page_title }}</h1>
+<p class="intro">
+  {{ "{:,}".format(stats.property_count) }} distinct
+  {{ "properties" if stats.property_count != 1 else "property" }}
+  {%- if stats.min_price and stats.max_price %},
+  from {{ stats.min_price | price }} to {{ stats.max_price | price }}
+  {%- if stats.median_price %} (median {{ stats.median_price | price }}){% endif %}
+  {%- endif %}.
+  Duplicates across listing sites merged; adverts that disappeared are removed.
+</p>
+
+{% if bed_links %}
+<nav class="sub-segments">
+  {% for b in bed_links %}
+  <a href="/houses-for-sale/{{ suburb }}/{{ b.bedrooms }}-bedroom">
+    {{ b.bedrooms }} bedroom ({{ b.property_count }})</a>
+  {% endfor %}
+</nav>
+{% endif %}
+
+<section class="grid">
+  {% for prop in properties %}
+  {{ property_card(prop) }}
+  {% endfor %}
+</section>
+
+{{ pagination(page, total_pages, base_path) }}
+
+{% if neighbours %}
+<section class="nearby">
+  <h2>Nearby suburbs</h2>
+  <nav>
+    {% for n in neighbours %}
+    <a href="/houses-for-sale/{{ n.suburb }}">{{ display_name(n.suburb) }}
+      ({{ n.property_count }})</a>
+    {% endfor %}
+  </nav>
+</section>
+{% endif %}
+{% endblock %}

@@ -34,8 +34,13 @@ app.include_router(properties_router)
 app.include_router(review_router)
 app.include_router(stats_router)
 
+from backend.web.segments import router as segments_router
+from backend.web.admin import router as admin_router
+
 # Consumer HTML pages (/, /property/{slug}) — server-rendered for SEO
 app.include_router(web_router)
+app.include_router(segments_router)
+app.include_router(admin_router)
 app.mount("/static", StaticFiles(directory="backend/web/static"), name="static")
 
 @app.get("/health")

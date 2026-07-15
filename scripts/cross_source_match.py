@@ -14,20 +14,30 @@ def hamming_distance(a: int, b: int) -> int:
     return bin(a ^ b).count("1")
 
 
-def fetch_distinct_hashes(db, source_id: int) -> Dict[str, List[int]]:
+def fetch_distinct_hashes(db, source_id: int,
+                          category: str = None) -> Dict[str, List[int]]:
     """
     Return {(phash, ahash, whash): [listing IDs]} for one source.
     Only includes rows where all three hashes are populated.
+
+    category partitions the match space: sale and rent listings of the
+    same building share photos but are different market offers and must
+    never be candidates against each other.
     """
     hash_map: Dict[str, List[int]] = {}
     start = 0
     batch_size = 1000
 
     while True:
-        result = (
+        query = (
             db.table("listings")
             .select("id, image_phash, image_ahash, image_whash")
             .eq("source_id", source_id)
+        )
+        if category:
+            query = query.eq("category", category)
+        result = (
+            query
             .not_.is_("image_phash", "null")
             .not_.is_("image_ahash", "null")
             .not_.is_("image_whash", "null")

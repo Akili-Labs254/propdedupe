@@ -11,9 +11,13 @@ from typing import Optional
 from backend.scraper.property24 import Property24Scraper
 from backend.db.save import save_listings
 
-BASE_URL = "https://www.property24.co.ke/houses-for-sale-in-nairobi-p95"
+# Category → listing index URL. Rent wedge = apartments/flats.
+CATEGORY_URLS = {
+    "sale": "https://www.property24.co.ke/houses-for-sale-in-nairobi-p95",
+    "rent": "https://www.property24.co.ke/apartments-flats-to-rent-in-nairobi-p95",
+}
 SOURCE_ID = 2  # Property24 Kenya — second row inserted into sources
-HARD_PAGE_CAP = 1200         # runaway guard; last known real count was ~579
+HARD_PAGE_CAP = 6000         # runaway guard (P24 rent is thousands of pages)
 MAX_CONSECUTIVE_EMPTY = 2    # stop after this many empty pages in a row
 
 
@@ -21,16 +25,17 @@ def log(msg):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
 
 
-def run(max_pages: Optional[int] = None) -> int:
+def run(max_pages: Optional[int] = None, category: str = "sale") -> int:
     """Scrape all pages (or up to max_pages) and return listings saved."""
+    base_url = CATEGORY_URLS[category]
     scraper = Property24Scraper()
     saved = 0
     empty_streak = 0
     cap = min(max_pages, HARD_PAGE_CAP) if max_pages else HARD_PAGE_CAP
 
     for page in range(1, cap + 1):
-        url = BASE_URL if page == 1 else f"{BASE_URL}?Page={page}"
-        log(f"[P24] page {page}...")
+        url = base_url if page == 1 else f"{base_url}?Page={page}"
+        log(f"[P24/{category}] page {page}...")
 
         try:
             html = scraper.fetch(url)
@@ -48,13 +53,14 @@ def run(max_pages: Optional[int] = None) -> int:
             continue
 
         empty_streak = 0
-        save_listings(listings, SOURCE_ID)
+        save_listings(listings, SOURCE_ID, category=category)
         saved += len(listings)
         print(f"  Saved {len(listings)} listings ({saved} total)")
 
-    log(f"[P24] finished: {saved} listings saved.")
+    log(f"[P24/{category}] finished: {saved} listings saved.")
     return saved
 
 
 if __name__ == "__main__":
-    run()
+    import sys
+    run(category="rent" if "--rent" in sys.argv else "sale")

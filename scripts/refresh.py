@@ -100,11 +100,12 @@ def stage_scrape(db, max_pages=None):
                            (2, "P24", scrape_property24)):
         pre_active = count_listings(db, source_id=sid, status="active")
         print(f"\n=== Scraping {name} (currently {pre_active} active) ===")
-        try:
-            saved = mod.run(max_pages=max_pages)
-        except Exception as e:
-            print(f"!! {name} scrape crashed: {e}")
-            saved = 0
+        saved = 0
+        for category in ("sale", "rent"):
+            try:
+                saved += mod.run(max_pages=max_pages, category=category)
+            except Exception as e:
+                print(f"!! {name}/{category} scrape crashed: {e}")
         results[sid] = (saved, pre_active)
     return results
 

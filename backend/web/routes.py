@@ -73,7 +73,8 @@ def home(
          .select("title, slug, price, price_min, price_max, location, "
                  "bedrooms, bathrooms, size_sqm, image_url, source_count",
                  count="exact")
-         .eq("status", "active"))
+         .eq("status", "active")
+         .eq("category", "sale"))  # rent/buy toggle ships with rent pages
 
     if location:
         q = q.ilike("location", f"%{location.strip()}%")
@@ -93,12 +94,26 @@ def home(
     total = result.count or 0
     total_pages = max(1, math.ceil(total / PER_PAGE))
 
-    return templates.TemplateResponse("home.html", {
-        "request": request,
+    # Crawlable path into the segment pages. Defensive: the view only
+    # exists after seo_support.sql has run — never 500 the homepage.
+    try:
+        top_suburbs = (db.table("suburb_stats")
+                       .select("suburb, property_count")
+                       .eq("category", "sale")
+                       .eq("is_suburb_total", True)
+                       .gte("property_count", 5)
+                       .order("property_count", desc=True)
+                       .limit(12)
+                       .execute()).data
+    except Exception:
+        top_suburbs = []
+
+    return templates.TemplateResponse(request, "home.html", {
         "properties": result.data,
         "total": total,
         "page": page,
         "total_pages": total_pages,
+        "top_suburbs": top_suburbs,
         "filters": {
             "location": location or "",
             "bedrooms": bedrooms,
@@ -155,8 +170,7 @@ def property_page(request: Request, slug: str):
             "active": l["status"] == "active",
         })
 
-    return templates.TemplateResponse("property.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "property.html", {
         "p": p,
         "sources": sources,
     })

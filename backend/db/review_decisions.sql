@@ -15,3 +15,4 @@ create table if not exists review_decisions (
     check (listing_a_id < listing_b_id)
 );
 alter table review_decisions enable row level security;
+grant select, insert, update, delete on review_decisions to service_role;
