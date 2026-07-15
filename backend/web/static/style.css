@@ -127,3 +127,8 @@ main { max-width: 1080px; margin: 0 auto; padding: 0 1rem 3rem; }
 .btn-merge, .btn-dismiss { padding: 0.45rem 1rem; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
 .btn-merge { background: var(--accent); color: #fff; }
 .btn-dismiss { background: #eee; color: var(--ink); }
+
+/* hero */
+.hero { margin: 1.5rem 0 0.5rem; }
+.hero h1 { font-size: 1.6rem; margin-bottom: 0.3rem; }
+.hero p { color: var(--muted); max-width: 640px; margin-top: 0; }

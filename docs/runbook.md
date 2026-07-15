@@ -47,6 +47,8 @@ python -m scripts.backfill_suburbs
 | `matches_scope.sql` | cross/intra scope on matches |
 | `seo_support.sql` | suburb column, suburb_stats view |
 | `hash_invalidation.sql` | null hashes when a cover photo URL changes |
+| `rental_support.sql` | category columns (sale/rent partition), per-category suburb_stats |
+| `admin_stats.sql` | dedup_stats + most_duplicated views, hide_generic_images() |
 
 All idempotent. VACUUM statements must run as single statements (the
 editor wraps multi-statement queries in a transaction).

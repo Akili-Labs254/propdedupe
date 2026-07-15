@@ -1,9 +1,13 @@
-"""SEO segment pages: /houses-for-sale/{suburb}[/{n}-bedroom].
+"""SEO segment pages, parametrized by category:
+
+    /houses-for-sale/{suburb}[/{n}-bedroom]
+    /apartments-for-rent/{suburb}[/{n}-bedroom]
 
 The long-tail traffic play. Every page is server-rendered with computed
 stats (count, price range, median) so it's genuinely more useful than
 the portals' generic filter pages — and only pages with enough inventory
-exist at all (MIN_SEGMENT), so we never serve Google thin content.
+exist at all (MIN_SEGMENT), so we never serve Google thin content. Rent
+pages 404 until rental data lands, then appear automatically.
 
 Internal links come from the dedup engine's suburb adjacency graph:
 each suburb page links its qualifying neighbours.
@@ -11,7 +15,7 @@ each suburb page links its qualifying neighbours.
 import math
 import os
 import re
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse, Response
@@ -28,16 +32,25 @@ BASE_URL = os.getenv("SITE_BASE_URL", "http://localhost:8000").rstrip("/")
 
 _BEDS_RE = re.compile(r"^([1-8])-bedroom$")
 
+# URL prefix + copy per category. Adding a category = one entry here
+# (plus scraper URLs) — everything else derives from it.
+CATEGORIES = {
+    "sale": {"prefix": "houses-for-sale", "plural": "Houses",
+             "action": "for Sale"},
+    "rent": {"prefix": "apartments-for-rent", "plural": "Apartments",
+             "action": "for Rent"},
+}
+
 
 def display_name(suburb: str) -> str:
     return suburb.title()
 
 
-def suburb_totals(db) -> List[dict]:
+def suburb_totals(db, category: str) -> List[dict]:
     """All suburb-wide stat rows meeting the threshold, biggest first."""
     rows = (db.table("suburb_stats")
             .select("*")
-            .eq("category", "sale")  # rent pages arrive with the rent data
+            .eq("category", category)
             .eq("is_suburb_total", True)
             .gte("property_count", MIN_SEGMENT)
             .order("property_count", desc=True)
@@ -45,9 +58,10 @@ def suburb_totals(db) -> List[dict]:
     return rows.data
 
 
-def segment_stats(db, suburb: str, bedrooms: Optional[int] = None) -> Optional[dict]:
+def segment_stats(db, suburb: str, category: str,
+                  bedrooms: Optional[int] = None) -> Optional[dict]:
     q = (db.table("suburb_stats").select("*")
-         .eq("suburb", suburb).eq("category", "sale"))
+         .eq("suburb", suburb).eq("category", category))
     if bedrooms is None:
         q = q.eq("is_suburb_total", True)
     else:
@@ -56,13 +70,14 @@ def segment_stats(db, suburb: str, bedrooms: Optional[int] = None) -> Optional[d
     return rows.data[0] if rows.data else None
 
 
-def fetch_properties(db, suburb: str, bedrooms: Optional[int], page: int):
+def fetch_properties(db, suburb: str, category: str,
+                     bedrooms: Optional[int], page: int):
     q = (db.table("properties")
          .select("title, slug, price, price_min, price_max, location, "
-                 "bedrooms, bathrooms, size_sqm, image_url, source_count",
-                 count="exact")
+                 "bedrooms, bathrooms, size_sqm, image_url, source_count, "
+                 "category", count="exact")
          .eq("status", "active")
-         .eq("category", "sale")
+         .eq("category", category)
          .eq("suburb", suburb))
     if bedrooms is not None:
         q = q.eq("bedrooms", bedrooms)
@@ -73,7 +88,7 @@ def fetch_properties(db, suburb: str, bedrooms: Optional[int], page: int):
             .execute())
 
 
-def qualifying_neighbours(db, suburb: str) -> List[dict]:
+def qualifying_neighbours(db, suburb: str, category: str) -> List[dict]:
     """Adjacent suburbs (from the dedup adjacency graph) that have their
     own segment page — the internal link mesh."""
     neighbours = sorted(ADJACENCY.get(suburb, ()))
@@ -81,7 +96,7 @@ def qualifying_neighbours(db, suburb: str) -> List[dict]:
         return []
     rows = (db.table("suburb_stats")
             .select("suburb, property_count")
-            .eq("category", "sale")
+            .eq("category", category)
             .eq("is_suburb_total", True)
             .gte("property_count", MIN_SEGMENT)
             .in_("suburb", neighbours)
@@ -90,40 +105,28 @@ def qualifying_neighbours(db, suburb: str) -> List[dict]:
     return rows.data
 
 
-@router.get("/houses-for-sale")
-def suburbs_index(request: Request):
+def _suburbs_index(request: Request, category: str):
+    cfg = CATEGORIES[category]
     db = get_client()
-    suburbs = suburb_totals(db)
     return templates.TemplateResponse(request, "suburbs.html", {
-        "suburbs": suburbs,
+        "suburbs": suburb_totals(db, category),
         "display_name": display_name,
+        "category": category,
+        "cfg": cfg,
     })
 
 
-@router.get("/houses-for-sale/{suburb}")
-def suburb_page(request: Request, suburb: str, page: int = Query(1, ge=1)):
-    return _segment_page(request, suburb, None, page)
-
-
-@router.get("/houses-for-sale/{suburb}/{beds_segment}")
-def suburb_beds_page(request: Request, suburb: str, beds_segment: str,
-                     page: int = Query(1, ge=1)):
-    m = _BEDS_RE.match(beds_segment)
-    if not m:
-        raise HTTPException(status_code=404, detail="Not found")
-    return _segment_page(request, suburb, int(m.group(1)), page)
-
-
-def _segment_page(request: Request, suburb: str, bedrooms: Optional[int],
-                  page: int):
+def _segment_page(request: Request, suburb: str, category: str,
+                  bedrooms: Optional[int], page: int):
+    cfg = CATEGORIES[category]
     suburb = suburb.lower().strip()
     db = get_client()
 
-    stats = segment_stats(db, suburb, bedrooms)
+    stats = segment_stats(db, suburb, category, bedrooms)
     if not stats or stats["property_count"] < MIN_SEGMENT:
         raise HTTPException(status_code=404, detail="Not found")
 
-    result = fetch_properties(db, suburb, bedrooms, page)
+    result = fetch_properties(db, suburb, category, bedrooms, page)
     total = result.count or 0
     total_pages = max(1, math.ceil(total / PER_PAGE))
 
@@ -133,7 +136,7 @@ def _segment_page(request: Request, suburb: str, bedrooms: Optional[int],
         rows = (db.table("suburb_stats")
                 .select("bedrooms, property_count")
                 .eq("suburb", suburb)
-                .eq("category", "sale")
+                .eq("category", category)
                 .eq("is_suburb_total", False)
                 .gte("property_count", MIN_SEGMENT)
                 .not_.is_("bedrooms", "null")
@@ -151,9 +154,50 @@ def _segment_page(request: Request, suburb: str, bedrooms: Optional[int],
         "page": page,
         "total_pages": total_pages,
         "bed_links": bed_links,
-        "neighbours": qualifying_neighbours(db, suburb),
+        "neighbours": qualifying_neighbours(db, suburb, category),
         "display_name": display_name,
+        "category": category,
+        "cfg": cfg,
     })
+
+
+def _parse_beds(beds_segment: str) -> int:
+    m = _BEDS_RE.match(beds_segment)
+    if not m:
+        raise HTTPException(status_code=404, detail="Not found")
+    return int(m.group(1))
+
+
+@router.get("/houses-for-sale")
+def sale_index(request: Request):
+    return _suburbs_index(request, "sale")
+
+
+@router.get("/apartments-for-rent")
+def rent_index(request: Request):
+    return _suburbs_index(request, "rent")
+
+
+@router.get("/houses-for-sale/{suburb}")
+def sale_suburb(request: Request, suburb: str, page: int = Query(1, ge=1)):
+    return _segment_page(request, suburb, "sale", None, page)
+
+
+@router.get("/apartments-for-rent/{suburb}")
+def rent_suburb(request: Request, suburb: str, page: int = Query(1, ge=1)):
+    return _segment_page(request, suburb, "rent", None, page)
+
+
+@router.get("/houses-for-sale/{suburb}/{beds_segment}")
+def sale_suburb_beds(request: Request, suburb: str, beds_segment: str,
+                     page: int = Query(1, ge=1)):
+    return _segment_page(request, suburb, "sale", _parse_beds(beds_segment), page)
+
+
+@router.get("/apartments-for-rent/{suburb}/{beds_segment}")
+def rent_suburb_beds(request: Request, suburb: str, beds_segment: str,
+                     page: int = Query(1, ge=1)):
+    return _segment_page(request, suburb, "rent", _parse_beds(beds_segment), page)
 
 
 # ── sitemap + robots ─────────────────────────────────────────────────
@@ -161,22 +205,28 @@ def _segment_page(request: Request, suburb: str, bedrooms: Optional[int],
 @router.get("/sitemap.xml")
 def sitemap():
     db = get_client()
-    urls = [f"{BASE_URL}/", f"{BASE_URL}/houses-for-sale"]
+    urls = [f"{BASE_URL}/"]
 
-    for row in suburb_totals(db):
-        urls.append(f"{BASE_URL}/houses-for-sale/{row['suburb']}")
+    for category, cfg in CATEGORIES.items():
+        totals = suburb_totals(db, category)
+        if not totals:
+            continue  # category not launched yet — no empty index page
+        prefix = cfg["prefix"]
+        urls.append(f"{BASE_URL}/{prefix}")
+        for row in totals:
+            urls.append(f"{BASE_URL}/{prefix}/{row['suburb']}")
 
-    beds_rows = (db.table("suburb_stats")
-                 .select("suburb, bedrooms")
-                 .eq("category", "sale")
-                 .eq("is_suburb_total", False)
-                 .gte("property_count", MIN_SEGMENT)
-                 .not_.is_("bedrooms", "null")
-                 .execute())
-    for row in beds_rows.data:
-        b = row["bedrooms"]
-        if 1 <= b <= 8:
-            urls.append(f"{BASE_URL}/houses-for-sale/{row['suburb']}/{b}-bedroom")
+        beds_rows = (db.table("suburb_stats")
+                     .select("suburb, bedrooms")
+                     .eq("category", category)
+                     .eq("is_suburb_total", False)
+                     .gte("property_count", MIN_SEGMENT)
+                     .not_.is_("bedrooms", "null")
+                     .execute())
+        for row in beds_rows.data:
+            b = row["bedrooms"]
+            if 1 <= b <= 8:
+                urls.append(f"{BASE_URL}/{prefix}/{row['suburb']}/{b}-bedroom")
 
     offset = 0
     while True:

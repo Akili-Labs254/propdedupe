@@ -177,8 +177,10 @@ def test_bad_beds_segment_404(client, monkeypatch):
 
 def test_sitemap(client, monkeypatch):
     use_db(monkeypatch, {
+        # sale: totals + beds rows; rent: no totals → category skipped
         "suburb_stats": [FakeResult([STATS]),
-                         FakeResult([{"suburb": "kilimani", "bedrooms": 3}])],
+                         FakeResult([{"suburb": "kilimani", "bedrooms": 3}]),
+                         FakeResult([])],
         "properties": [FakeResult([{"slug": "abc-123"}])],
     })
     r = client.get("/sitemap.xml")

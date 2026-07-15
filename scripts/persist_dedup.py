@@ -426,6 +426,8 @@ def main():
             "baths_score": round(s["signals"]["baths"], 2),
             "location_score": round(s["signals"]["location"], 2),
             "scope": "cross",
+            "category": (details.get(s["brk_rep"], {}).get("category")
+                         or "sale"),
         })
 
     # Batch insert in chunks (Supabase payload size limit)
@@ -509,6 +511,7 @@ def main():
                 "baths_score": round(signals["baths"], 2),
                 "location_score": round(signals["location"], 2),
                 "scope": "intra",
+                "category": ra.get("category") or "sale",
             })
 
     for i in range(0, len(intra_rows), 50):

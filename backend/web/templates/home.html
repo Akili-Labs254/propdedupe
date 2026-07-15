@@ -2,8 +2,23 @@
 {% from "_macros.html" import property_card, pagination %}
 
 {% block content %}
+{% if trust %}
+<section class="hero">
+  <h1>Every Nairobi property listing. Once.</h1>
+  <p>We index {{ "{:,}".format(trust.listings) }} live adverts across the
+  major listing sites, merge the {{ "{:,}".format(trust.merged) }}
+  duplicates, and drop adverts that have quietly expired — leaving
+  {{ "{:,}".format(trust.properties) }} real properties. Enquiries go
+  straight to the original advert.</p>
+</section>
+{% endif %}
+
 <section class="search-box">
   <form method="get" action="/">
+    <select name="category">
+      <option value="sale" {% if filters.category == "sale" %}selected{% endif %}>Buy</option>
+      <option value="rent" {% if filters.category == "rent" %}selected{% endif %}>Rent</option>
+    </select>
     <input type="text" name="location" placeholder="Location (e.g. Kilimani)"
            value="{{ filters.location }}">
     <select name="bedrooms">
@@ -30,7 +45,7 @@
   {% endfor %}
 </section>
 
-{% set qs = "&location=" ~ filters.location ~ (("&bedrooms=" ~ filters.bedrooms) if filters.bedrooms is not none else "") ~ (("&min_price=" ~ filters.min_price) if filters.min_price is not none else "") ~ (("&max_price=" ~ filters.max_price) if filters.max_price is not none else "") %}
+{% set qs = "&category=" ~ filters.category ~ "&location=" ~ filters.location ~ (("&bedrooms=" ~ filters.bedrooms) if filters.bedrooms is not none else "") ~ (("&min_price=" ~ filters.min_price) if filters.min_price is not none else "") ~ (("&max_price=" ~ filters.max_price) if filters.max_price is not none else "") %}
 {{ pagination(page, total_pages, "/", qs) }}
 
 {% if top_suburbs %}
@@ -38,10 +53,10 @@
   <h2>Browse by suburb</h2>
   <nav>
     {% for s in top_suburbs %}
-    <a href="/houses-for-sale/{{ s.suburb }}">{{ s.suburb | title }}
+    <a href="/{{ suburb_prefix }}/{{ s.suburb }}">{{ s.suburb | title }}
       ({{ s.property_count }})</a>
     {% endfor %}
-    <a href="/houses-for-sale">All suburbs →</a>
+    <a href="/{{ suburb_prefix }}">All suburbs →</a>
   </nav>
 </section>
 {% endif %}

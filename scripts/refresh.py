@@ -91,8 +91,15 @@ def stage_check(db):
 
 # ── stage: scrape ────────────────────────────────────────────────────
 
-def stage_scrape(db, max_pages=None):
-    """Run both scrapers. Returns {source_id: (saved, pre_run_active)}."""
+def stage_scrape(db, max_pages=None, rent_max_pages=None):
+    """Run both scrapers. Returns {source_id: (saved, pre_run_active)}.
+
+    rent_max_pages caps ONLY the rent category — free-tier disk can't
+    hold the full P24 rental corpus (~7.5KB/listing, 500MB tier), so we
+    load the first N pages. CAVEAT: on repeat capped runs, rent listings
+    beyond the cap will churn stale/active as the site reorders pages —
+    acceptable while rentals bootstrap, revisit at the tier upgrade.
+    """
     from scripts import scrape_buyrentkenya, scrape_property24
 
     results = {}
@@ -102,8 +109,11 @@ def stage_scrape(db, max_pages=None):
         print(f"\n=== Scraping {name} (currently {pre_active} active) ===")
         saved = 0
         for category in ("sale", "rent"):
+            cap = max_pages
+            if category == "rent" and rent_max_pages is not None:
+                cap = min(rent_max_pages, max_pages) if max_pages else rent_max_pages
             try:
-                saved += mod.run(max_pages=max_pages, category=category)
+                saved += mod.run(max_pages=cap, category=category)
             except Exception as e:
                 print(f"!! {name}/{category} scrape crashed: {e}")
         results[sid] = (saved, pre_active)
@@ -213,6 +223,15 @@ def stage_dedup():
     from scripts.persist_dedup import main as persist_main
     persist_main()
 
+    # Hide stock placeholder images (auction signs etc.) — see
+    # backend/db/admin_stats.sql. Non-fatal if the function is missing.
+    try:
+        db = get_client()
+        res = db.rpc("hide_generic_images", {}).execute()
+        print(f"  Generic images hidden on {res.data} properties")
+    except Exception as e:
+        print(f"  (generic-image pass skipped: {e})")
+
 
 # ── main ─────────────────────────────────────────────────────────────
 
@@ -229,6 +248,8 @@ def main():
                         help="scrape + hashes + stale + dedup")
     parser.add_argument("--max-pages", type=int, default=None,
                         help="limit pages per scraper (smoke tests)")
+    parser.add_argument("--rent-max-pages", type=int, default=None,
+                        help="cap ONLY the rent category (free-tier disk)")
     parser.add_argument("--force", action="store_true",
                         help="run stale pass even if scrape looks broken")
     args = parser.parse_args()
@@ -248,7 +269,8 @@ def main():
 
     scrape_results = None
     if args.all or args.scrape:
-        scrape_results = stage_scrape(db, max_pages=args.max_pages)
+        scrape_results = stage_scrape(db, max_pages=args.max_pages,
+                                      rent_max_pages=args.rent_max_pages)
 
     if args.all or args.hashes:
         stage_hashes(db)

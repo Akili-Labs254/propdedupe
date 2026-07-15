@@ -34,11 +34,13 @@ def review_page(
     request: Request,
     key: Optional[str] = Query(None),
     scope: Optional[str] = Query(None),
+    category: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
 ):
     _check_key(key)
     db = get_client()
-    result = fetch_review_page(db, page, per_page=20, scope=scope)
+    result = fetch_review_page(db, page, per_page=20, scope=scope,
+                               category=category)
     total_pages = max(1, -(-(result["total"] or 0) // 20))
 
     return templates.TemplateResponse(request, "admin_review.html", {
@@ -47,30 +49,64 @@ def review_page(
         "page": page,
         "total_pages": total_pages,
         "scope": scope or "",
+        "category": category or "",
         "key": key,
         "source_names": SOURCE_NAMES,
     })
 
 
-def _action_redirect(key: str, scope: str, page: int) -> RedirectResponse:
+@router.get("/admin/stats")
+def stats_page(request: Request, key: Optional[str] = Query(None)):
+    """Dedup health dashboard: duplication rate per category, worst
+    offenders, review queue composition."""
+    _check_key(key)
+    db = get_client()
+
+    dedup = (db.table("dedup_stats").select("*")
+             .order("category").order("status").execute()).data
+
+    worst = (db.table("most_duplicated").select("*")
+             .order("listing_count", desc=True).limit(15).execute()).data
+
+    queue = []
+    for scope in ("cross", "intra"):
+        for tier in ("review", "auto-merge", "merged", "dismissed", "distinct"):
+            n = (db.table("matches").select("id", count="exact")
+                 .eq("scope", scope).eq("tier", tier)
+                 .limit(1).execute()).count or 0
+            if n:
+                queue.append({"scope": scope, "tier": tier, "count": n})
+
+    return templates.TemplateResponse(request, "admin_stats.html", {
+        "dedup": dedup,
+        "worst": worst,
+        "queue": queue,
+        "key": key,
+    })
+
+
+def _action_redirect(key: str, scope: str, category: str,
+                     page: int) -> RedirectResponse:
     url = f"/admin/review?key={key}&page={page}"
     if scope:
         url += f"&scope={scope}"
+    if category:
+        url += f"&category={category}"
     # 303: browsers follow a POST's redirect with GET
     return RedirectResponse(url, status_code=303)
 
 
 @router.post("/admin/review/{match_id}/merge")
-def admin_merge(match_id: int, key: str = Form(...),
-                scope: str = Form(""), page: int = Form(1)):
+def admin_merge(match_id: int, key: str = Form(...), scope: str = Form(""),
+                category: str = Form(""), page: int = Form(1)):
     _check_key(key)
     do_merge(get_client(), match_id)
-    return _action_redirect(key, scope, page)
+    return _action_redirect(key, scope, category, page)
 
 
 @router.post("/admin/review/{match_id}/dismiss")
-def admin_dismiss(match_id: int, key: str = Form(...),
-                  scope: str = Form(""), page: int = Form(1)):
+def admin_dismiss(match_id: int, key: str = Form(...), scope: str = Form(""),
+                  category: str = Form(""), page: int = Form(1)):
     _check_key(key)
     do_dismiss(get_client(), match_id)
-    return _action_redirect(key, scope, page)
+    return _action_redirect(key, scope, category, page)

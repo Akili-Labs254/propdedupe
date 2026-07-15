@@ -7,11 +7,16 @@
 {% block content %}
 <h1>Review queue</h1>
 <p class="intro">{{ "{:,}".format(total) }} pairs waiting.
-  Filter:
-  <a href="/admin/review?key={{ key }}">all</a> ·
-  <a href="/admin/review?key={{ key }}&scope=cross">cross-source</a> ·
-  <a href="/admin/review?key={{ key }}&scope=intra">intra-source</a>
-  {% if scope %}(showing {{ scope }}){% endif %}
+  <a href="/admin/stats?key={{ key }}">→ dedup stats</a><br>
+  Scope:
+  <a href="/admin/review?key={{ key }}{% if category %}&category={{ category }}{% endif %}">all</a> ·
+  <a href="/admin/review?key={{ key }}&scope=cross{% if category %}&category={{ category }}{% endif %}">cross</a> ·
+  <a href="/admin/review?key={{ key }}&scope=intra{% if category %}&category={{ category }}{% endif %}">intra</a>
+  &nbsp;|&nbsp; Category:
+  <a href="/admin/review?key={{ key }}{% if scope %}&scope={{ scope }}{% endif %}">all</a> ·
+  <a href="/admin/review?key={{ key }}&category=sale{% if scope %}&scope={{ scope }}{% endif %}">sale</a> ·
+  <a href="/admin/review?key={{ key }}&category=rent{% if scope %}&scope={{ scope }}{% endif %}">rent</a>
+  {% if scope or category %}(showing {{ scope or "all" }} / {{ category or "all" }}){% endif %}
 </p>
 
 {% for m in matches %}
@@ -42,12 +47,14 @@
     <form method="post" action="/admin/review/{{ m.id }}/merge">
       <input type="hidden" name="key" value="{{ key }}">
       <input type="hidden" name="scope" value="{{ scope }}">
+      <input type="hidden" name="category" value="{{ category }}">
       <input type="hidden" name="page" value="{{ page }}">
       <button class="btn-merge">Merge — same property</button>
     </form>
     <form method="post" action="/admin/review/{{ m.id }}/dismiss">
       <input type="hidden" name="key" value="{{ key }}">
       <input type="hidden" name="scope" value="{{ scope }}">
+      <input type="hidden" name="category" value="{{ category }}">
       <input type="hidden" name="page" value="{{ page }}">
       <button class="btn-dismiss">Dismiss — different</button>
     </form>

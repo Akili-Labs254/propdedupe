@@ -33,15 +33,17 @@ def list_review_pairs(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     scope: Optional[str] = Query(None, description="'cross' or 'intra'"),
+    category: Optional[str] = Query(None, description="'sale' or 'rent'"),
 ):
     """List match pairs in the review queue — pairs the scorer flagged as
     possibly the same property but wasn't confident enough to auto-merge."""
     db = get_client()
-    return fetch_review_page(db, page, per_page, scope)
+    return fetch_review_page(db, page, per_page, scope, category)
 
 
 def fetch_review_page(db, page: int, per_page: int,
-                      scope: Optional[str] = None) -> dict:
+                      scope: Optional[str] = None,
+                      category: Optional[str] = None) -> dict:
     """Review-tier matches enriched with both listings' details.
     Shared by the JSON API and the admin HTML page."""
     offset = (page - 1) * per_page
@@ -50,6 +52,8 @@ def fetch_review_page(db, page: int, per_page: int,
              .eq("tier", "review"))
     if scope in ("cross", "intra"):
         query = query.eq("scope", scope)
+    if category in ("sale", "rent"):
+        query = query.eq("category", category)
     result = (query.order("score")
               .range(offset, offset + per_page - 1)
               .execute())

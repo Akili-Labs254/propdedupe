@@ -57,7 +57,7 @@
     <a class="source-link {{ 'inactive' if not s.active }}" href="{{ s.url }}"
        rel="nofollow noopener" target="_blank">
       <strong>{{ s.name }}</strong>
-      <span>{{ s.price | price }}</span>
+      <span>{{ s.price | price }}{% if p.category == "rent" and s.price %} /month{% endif %}</span>
       {% if not s.active %}<span class="stale-note">may no longer be listed</span>{% endif %}
     </a>
     {% endfor %}
