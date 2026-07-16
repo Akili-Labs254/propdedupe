@@ -82,6 +82,21 @@ alert on non-zero exit — a run died silently once already.)
 fix required; the stale-pass guard (<50% of active count) protects the
 DB meanwhile.
 
+**Pagination never ends (404s to the page cap)** — sites differ in
+end-of-listing behaviour: P24 serves empty pages, BRK 404s. Both
+scrapers stop on 2 empty pages OR 3 consecutive failures.
+
+**`chk_status` / check-constraint violation on a rarely-written value**
+— a legacy constraint predating the pipeline didn't allow 'delisted';
+it only fired on the first run old enough to delist anything.
+Constraints on legacy columns fire on FIRST WRITE of a new value, not
+at deploy time — test rare transitions early.
+
+**Resuming a crashed run's --stale stage** — NEVER bare `--stale`: the
+cutoff defaults to the new invocation's start time and mass-stales
+everything scraped before it. Pass the original run's timestamp:
+`--stale-cutoff "<'Run started' line from the crashed log>"`.
+
 ## Invariants (do not violate casually)
 - Python + SQL cluster_key formulas byte-identical.
 - `.order("id")` before `.range()` on every paginated fetch.

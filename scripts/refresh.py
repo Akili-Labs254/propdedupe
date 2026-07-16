@@ -250,6 +250,13 @@ def main():
                         help="limit pages per scraper (smoke tests)")
     parser.add_argument("--rent-max-pages", type=int, default=None,
                         help="cap ONLY the rent category (free-tier disk)")
+    parser.add_argument("--stale-cutoff", type=str, default=None,
+                        help="ISO timestamp to use as the stale cutoff "
+                             "instead of now — REQUIRED when resuming a "
+                             "crashed run's --stale stage (use the 'Run "
+                             "started' line from that run's log), else "
+                             "everything scraped before the resume gets "
+                             "wrongly staled")
     parser.add_argument("--force", action="store_true",
                         help="run stale pass even if scrape looks broken")
     args = parser.parse_args()
@@ -276,11 +283,15 @@ def main():
         stage_hashes(db)
 
     if args.all or args.stale:
+        cutoff = run_start
+        if args.stale_cutoff:
+            cutoff = datetime.fromisoformat(args.stale_cutoff)
+            print(f"Using explicit stale cutoff: {cutoff.isoformat()}")
         if args.max_pages and not args.force:
             print("\n--max-pages set: skipping stale pass (partial scrape "
                   "would mass-stale everything). Use --force to override.")
         else:
-            stage_stale(db, run_start, scrape_results, force=args.force)
+            stage_stale(db, cutoff, scrape_results, force=args.force)
 
     if args.all or args.dedup:
         stage_dedup()
