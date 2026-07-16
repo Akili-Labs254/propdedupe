@@ -132,3 +132,12 @@ main { max-width: 1080px; margin: 0 auto; padding: 0 1rem 3rem; }
 .hero { margin: 1.5rem 0 0.5rem; }
 .hero h1 { font-size: 1.6rem; margin-bottom: 0.3rem; }
 .hero p { color: var(--muted); max-width: 640px; margin-top: 0; }
+
+/* batch triage */
+.flash { background: #e6f4f1; color: var(--accent); padding: 0.5rem 0.9rem; border-radius: 6px; font-weight: 600; }
+.pick { padding: 0.35rem 0.9rem; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; font-size: 0.9rem; background: var(--card); }
+.pick input { margin-right: 0.3rem; }
+.pick-merge:has(input:checked) { background: var(--accent); color: #fff; border-color: var(--accent); }
+.pick-dismiss:has(input:checked) { background: #b3372f; color: #fff; border-color: #b3372f; }
+.batch-bar { position: sticky; bottom: 0; display: flex; gap: 1rem; align-items: center; justify-content: flex-end; padding: 0.8rem 1rem; background: var(--bg); border-top: 1px solid var(--line); }
+.batch-bar span { color: var(--muted); font-size: 0.9rem; }

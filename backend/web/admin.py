@@ -36,6 +36,8 @@ def review_page(
     scope: Optional[str] = Query(None),
     category: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
+    applied: Optional[int] = Query(None),
+    failed: Optional[int] = Query(None),
 ):
     _check_key(key)
     db = get_client()
@@ -52,6 +54,8 @@ def review_page(
         "category": category or "",
         "key": key,
         "source_names": SOURCE_NAMES,
+        "applied": applied,
+        "failed": failed,
     })
 
 
@@ -110,3 +114,44 @@ def admin_dismiss(match_id: int, key: str = Form(...), scope: str = Form(""),
     _check_key(key)
     do_dismiss(get_client(), match_id)
     return _action_redirect(key, scope, category, page)
+
+
+@router.post("/admin/review/batch")
+async def admin_batch(request: Request):
+    """Apply a page of triage decisions in one submit.
+
+    The form carries one radio group per pair (decision_<match_id> =
+    merge | dismiss | skip). Skips are ignored; failures on individual
+    pairs (e.g. already merged) don't abort the rest.
+    """
+    form = await request.form()
+    key = form.get("key")
+    _check_key(key)
+    db = get_client()
+
+    applied = 0
+    failed = 0
+    for name, value in form.items():
+        if not name.startswith("decision_") or value == "skip":
+            continue
+        try:
+            match_id = int(name.split("_", 1)[1])
+        except ValueError:
+            continue
+        try:
+            if value == "merge":
+                do_merge(db, match_id)
+                applied += 1
+            elif value == "dismiss":
+                do_dismiss(db, match_id)
+                applied += 1
+        except HTTPException:
+            failed += 1
+
+    url = (f"/admin/review?key={key}&page={form.get('page', 1)}"
+           f"&applied={applied}&failed={failed}")
+    if form.get("scope"):
+        url += f"&scope={form.get('scope')}"
+    if form.get("category"):
+        url += f"&category={form.get('category')}"
+    return RedirectResponse(url, status_code=303)

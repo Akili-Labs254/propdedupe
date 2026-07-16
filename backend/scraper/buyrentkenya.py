@@ -56,14 +56,36 @@ class BuyRentKenyaScraper(BaseScraper):
             return []
         items = webpage.get("mainEntity", {}).get("itemListElement", [])
 
+        # Rental JSON-LD omits the Product url (sale markup has it), so
+        # fall back to the page's cards: each /listings/ anchor sits
+        # right before an <h2> holding the exact listing name. Pair
+        # href → name and look up per item; FIFO queues keep repeated
+        # names (two identical adverts on one page) in page order.
+        title_to_hrefs = {}
+        for a in soup.select('a[href*="/listings/"]'):
+            href = (a.get("href") or "").split("?")[0]
+            if href.startswith("/"):
+                href = self.base_url + href
+            h2 = a.find_next("h2")
+            if href and h2:
+                key = h2.get_text(strip=True).casefold()
+                queue = title_to_hrefs.setdefault(key, [])
+                if href not in queue:
+                    queue.append(href)
+
         listings = []
         for entry in items:
             raw = entry.get("item", {})
             title = raw.get("name")
             bedrooms, location = parse_title(title) if title else (None, None)
+            url = raw.get("url") or entry.get("url")
+            if not url and title:
+                queue = title_to_hrefs.get(title.strip().casefold())
+                if queue:
+                    url = queue.pop(0)
             listing = ScrapedListing(
                 source_listing_id = raw.get("@id", "").split("/")[-1],
-                url = raw.get("url"),
+                url = url,
                 title = raw.get("name"),
                 price = raw.get("offers", {}).get("priceSpecification", {}).get("price"),
                 bedrooms = bedrooms,

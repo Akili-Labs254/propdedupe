@@ -225,4 +225,31 @@ def test_admin_renders_queue(client, monkeypatch):
     r = client.get("/admin/review?key=sekrit&scope=intra")
     assert r.status_code == 200
     assert "House A" in r.text
-    assert "/admin/review/9/merge" in r.text
+    assert 'name="decision_9"' in r.text          # batch radios
+    assert "/admin/review/batch" in r.text        # one form, one confirm
+
+
+def test_admin_batch_apply(client, monkeypatch):
+    monkeypatch.setenv("ADMIN_API_KEY", "sekrit")
+    # dismiss path: fetch match (review tier) → update decision → update tier
+    match = {"id": 9, "listing_a_id": 1, "listing_b_id": 2, "tier": "review"}
+    use_db(monkeypatch, {
+        "matches": [FakeResult([match]), FakeResult([match])],
+        "review_decisions": [FakeResult([])],
+    })
+    r = client.post("/admin/review/batch", data={
+        "key": "sekrit", "scope": "intra", "category": "rent", "page": "2",
+        "decision_9": "dismiss", "decision_10": "skip",
+    }, follow_redirects=False)
+    assert r.status_code == 303
+    loc = r.headers["location"]
+    assert "applied=1" in loc and "failed=0" in loc
+    assert "scope=intra" in loc and "category=rent" in loc and "page=2" in loc
+
+
+def test_admin_batch_requires_key(client, monkeypatch):
+    monkeypatch.setenv("ADMIN_API_KEY", "sekrit")
+    use_db(monkeypatch, {})
+    r = client.post("/admin/review/batch", data={"key": "wrong"},
+                    follow_redirects=False)
+    assert r.status_code == 401

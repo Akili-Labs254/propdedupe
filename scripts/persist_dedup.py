@@ -180,6 +180,36 @@ def snapshot_slug_state(db) -> Dict[int, str]:
     return snapshot
 
 
+def persist_slug_snapshot(db, snapshot: Dict[int, str]):
+    """Write the snapshot to the slug_snapshot table BEFORE clearing —
+    a crash between clear and rebuild must not lose slug inheritance."""
+    _with_retry(lambda: db.table("slug_snapshot")
+                .delete().gt("listing_id", 0).execute())
+    rows = [{"listing_id": lid, "slug": slug}
+            for lid, slug in snapshot.items()]
+    for i in range(0, len(rows), 500):
+        chunk = rows[i:i + 500]
+        _with_retry(lambda c=chunk:
+                    db.table("slug_snapshot").insert(c).execute())
+
+
+def load_slug_snapshot_fallback(db) -> Dict[int, str]:
+    """Recover the last crash-safe snapshot (rerun-after-crash path)."""
+    out = {}
+    offset = 0
+    while True:
+        batch = (db.table("slug_snapshot").select("listing_id, slug")
+                 .order("listing_id").range(offset, offset + 999).execute())
+        if not batch.data:
+            break
+        for row in batch.data:
+            out[row["listing_id"]] = row["slug"]
+        if len(batch.data) < 1000:
+            break
+        offset += 1000
+    return out
+
+
 def property_status(member_rows: List[dict]) -> str:
     """active if ANY member listing is still active, else inactive."""
     return "active" if any(r.get("status") == "active" for r in member_rows) \
@@ -308,7 +338,25 @@ def main():
     # the slugs their member listings carried (stable public URLs).
     print("Snapshotting slug state...")
     snapshot = snapshot_slug_state(db)
-    print(f"  {len(snapshot)} listings carry a slug from the previous build")
+    if snapshot:
+        try:
+            persist_slug_snapshot(db, snapshot)
+            print(f"  {len(snapshot)} listings carry a slug "
+                  "(crash-safe copy saved)")
+        except Exception as e:
+            print(f"  {len(snapshot)} listings carry a slug "
+                  f"(crash-safe copy FAILED: {e} — run "
+                  "backend/db/slug_snapshot.sql)")
+    else:
+        try:
+            snapshot = load_slug_snapshot_fallback(db)
+        except Exception:
+            snapshot = {}
+        if snapshot:
+            print(f"  {len(snapshot)} slugs RECOVERED from crash-safe copy")
+        else:
+            print("  0 slugs found (first run, or crash lost the snapshot "
+                  "— slugs will regenerate deterministically)")
     alloc = SlugAllocator(snapshot)
     prop_members: Dict[int, List[int]] = {}  # new property_id → member ids
 
