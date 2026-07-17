@@ -3,6 +3,19 @@
 Operational reference: how to run everything, and what the failures
 we've actually hit mean. Update this when something new bites.
 
+## Scheduled refresh (GitHub Actions)
+
+`.github/workflows/refresh.yml` runs the full cycle daily at 01:00 UTC.
+- Secrets (repo Settings → Secrets and variables → Actions):
+  `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`.
+- The cron only fires from the DEFAULT branch; until dev merges to
+  main, trigger manually: Actions tab → Scheduled refresh → Run
+  workflow (optionally set max_pages=2 as a smoke test).
+- Alerting: GitHub emails the repo owner on failure. A source saving
+  ZERO listings exits non-zero on purpose (dead parser / blocked IP).
+- If scrapes fail only on Actions but work locally → portals are
+  blocking datacenter IPs; fall back to Render cron or local runs.
+
 ## Regular operations
 
 ```bash

@@ -298,6 +298,18 @@ def main():
 
     print(f"\nRun finished ({datetime.now(timezone.utc).isoformat()}).")
 
+    # Exit non-zero if any source saved NOTHING — that's a dead parser
+    # or blocked IP, and scheduled runs must alert (CI fails the job and
+    # emails), not shrug. The <50% guard already protected the DB.
+    if scrape_results:
+        dead = [sid for sid, (saved, _) in scrape_results.items() if saved == 0]
+        if dead:
+            names = {1: "BRK", 2: "P24"}
+            print(f"FAILURE: no listings saved for "
+                  f"{', '.join(names.get(s, str(s)) for s in dead)} — "
+                  "check parser/IP-blocking.")
+            sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
