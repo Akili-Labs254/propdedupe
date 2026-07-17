@@ -47,11 +47,28 @@ class BaseScraper:
         self.session.headers.update({"User-Agent": config.USER_AGENT})
 
     def fetch(self, url: str) -> str:
-        """Politely fetch a page and return its HTML. Rate-limited."""
-        time.sleep(config.REQUEST_DELAY_SECONDS)
-        resp = self.session.get(url, timeout=30)
-        resp.raise_for_status()
-        return resp.text
+        """Politely fetch a page and return its HTML.
+
+        Rate-limited, with exponential backoff on 429/5xx (the vision
+        doc's polite-indexer rule, finally implemented — P24 rate-limits
+        bursts from datacenter IPs with 503s that pass on retry).
+        Hard errors (404 etc.) raise immediately so end-of-pagination
+        detection still works.
+        """
+        last_resp = None
+        for extra_wait in (0, 10, 30, 60):
+            if extra_wait:
+                print(f"  {last_resp.status_code} — backing off {extra_wait}s...")
+                time.sleep(extra_wait)
+            time.sleep(config.REQUEST_DELAY_SECONDS)
+            resp = self.session.get(url, timeout=30)
+            if resp.status_code == 429 or resp.status_code >= 500:
+                last_resp = resp
+                continue
+            resp.raise_for_status()
+            return resp.text
+        last_resp.raise_for_status()
+        return last_resp.text  # unreachable; keeps type-checkers calm
 
     def parse(self, html: str) -> list[ScrapedListing]:
         """Each source implements this. Returns the listings from one page."""
