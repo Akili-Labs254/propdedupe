@@ -91,7 +91,7 @@ def stage_check(db):
 
 # ── stage: scrape ────────────────────────────────────────────────────
 
-def stage_scrape(db, max_pages=None, rent_max_pages=None):
+def stage_scrape(db, max_pages=None, rent_max_pages=None, sources="both"):
     """Run both scrapers. Returns {source_id: (saved, pre_run_active)}.
 
     rent_max_pages caps ONLY the rent category — free-tier disk can't
@@ -102,9 +102,18 @@ def stage_scrape(db, max_pages=None, rent_max_pages=None):
     """
     from scripts import scrape_buyrentkenya, scrape_property24
 
+    # P24 blocks datacenter IPs (GitHub runners) with sustained 503s, so
+    # scheduled CI runs use --sources brk; P24 scrapes run from
+    # residential IPs (local/laptop) every few days. A source that isn't
+    # attempted is skipped by the stale guard and the failure check.
+    jobs = [(1, "BRK", scrape_buyrentkenya), (2, "P24", scrape_property24)]
+    if sources == "brk":
+        jobs = jobs[:1]
+    elif sources == "p24":
+        jobs = jobs[1:]
+
     results = {}
-    for sid, name, mod in ((1, "BRK", scrape_buyrentkenya),
-                           (2, "P24", scrape_property24)):
+    for sid, name, mod in jobs:
         pre_active = count_listings(db, source_id=sid, status="active")
         print(f"\n=== Scraping {name} (currently {pre_active} active) ===")
         saved = 0
@@ -254,6 +263,10 @@ def main():
                         help="limit pages per scraper (smoke tests)")
     parser.add_argument("--rent-max-pages", type=int, default=None,
                         help="cap ONLY the rent category (free-tier disk)")
+    parser.add_argument("--sources", choices=("both", "brk", "p24"),
+                        default="both",
+                        help="which sources to scrape (CI uses brk — "
+                             "P24 blocks datacenter IPs)")
     parser.add_argument("--stale-cutoff", type=str, default=None,
                         help="ISO timestamp to use as the stale cutoff "
                              "instead of now — REQUIRED when resuming a "
@@ -281,7 +294,8 @@ def main():
     scrape_results = None
     if args.all or args.scrape:
         scrape_results = stage_scrape(db, max_pages=args.max_pages,
-                                      rent_max_pages=args.rent_max_pages)
+                                      rent_max_pages=args.rent_max_pages,
+                                      sources=args.sources)
 
     if args.all or args.hashes:
         stage_hashes(db)

@@ -13,8 +13,11 @@ we've actually hit mean. Update this when something new bites.
   workflow (optionally set max_pages=2 as a smoke test).
 - Alerting: GitHub emails the repo owner on failure. A source saving
   ZERO listings exits non-zero on purpose (dead parser / blocked IP).
-- If scrapes fail only on Actions but work locally → portals are
-  blocking datacenter IPs; fall back to Render cron or local runs.
+- P24 BLOCKS GitHub's datacenter IPs (sustained 503s even with backoff,
+  tested 2026-07-17), so CI runs `--sources brk`. P24 is scraped from a
+  residential IP every 2-3 days:
+  `caffeinate -i python -u -m scripts.refresh --all --sources p24 --rent-max-pages 500`
+  The stale guard auto-skips whichever source a run didn't scrape.
 
 ## Regular operations
 
