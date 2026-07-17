@@ -108,15 +108,19 @@ def stage_scrape(db, max_pages=None, rent_max_pages=None):
         pre_active = count_listings(db, source_id=sid, status="active")
         print(f"\n=== Scraping {name} (currently {pre_active} active) ===")
         saved = 0
+        per_category = {}
         for category in ("sale", "rent"):
             cap = max_pages
             if category == "rent" and rent_max_pages is not None:
                 cap = min(rent_max_pages, max_pages) if max_pages else rent_max_pages
             try:
-                saved += mod.run(max_pages=cap, category=category)
+                n = mod.run(max_pages=cap, category=category)
             except Exception as e:
                 print(f"!! {name}/{category} scrape crashed: {e}")
-        results[sid] = (saved, pre_active)
+                n = 0
+            per_category[category] = n
+            saved += n
+        results[sid] = (saved, pre_active, per_category)
     return results
 
 
@@ -188,7 +192,7 @@ def stage_stale(db, run_start, scrape_results=None, force=False):
 
     for sid, name in ((1, "BRK"), (2, "P24")):
         if scrape_results and not force:
-            saved, pre_active = scrape_results.get(sid, (0, 0))
+            saved, pre_active = scrape_results.get(sid, (0, 0, {}))[:2]
             if pre_active > 0 and saved < pre_active * MIN_SCRAPE_RATIO:
                 print(f"  {name}: scrape saved {saved} vs {pre_active} active "
                       f"(< {MIN_SCRAPE_RATIO:.0%}) — SKIPPING stale pass. "
@@ -298,15 +302,21 @@ def main():
 
     print(f"\nRun finished ({datetime.now(timezone.utc).isoformat()}).")
 
-    # Exit non-zero if any source saved NOTHING — that's a dead parser
-    # or blocked IP, and scheduled runs must alert (CI fails the job and
-    # emails), not shrug. The <50% guard already protected the DB.
+    # Exit non-zero if any source/CATEGORY saved NOTHING — a dead parser
+    # or blocked IP must alert (CI fails the job and emails), not shrug.
+    # Per-category, because P24 once saved 21 sale + 0 rent and a
+    # per-source total of 21 sailed through green. The <50% stale guard
+    # already protected the DB either way.
     if scrape_results:
-        dead = [sid for sid, (saved, _) in scrape_results.items() if saved == 0]
+        names = {1: "BRK", 2: "P24"}
+        dead = []
+        for sid, tup in scrape_results.items():
+            per_category = tup[2] if len(tup) > 2 else {}
+            for cat, n in per_category.items():
+                if n == 0:
+                    dead.append(f"{names.get(sid, sid)}/{cat}")
         if dead:
-            names = {1: "BRK", 2: "P24"}
-            print(f"FAILURE: no listings saved for "
-                  f"{', '.join(names.get(s, str(s)) for s in dead)} — "
+            print(f"FAILURE: no listings saved for {', '.join(dead)} — "
                   "check parser/IP-blocking.")
             sys.exit(1)
 

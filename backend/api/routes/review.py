@@ -206,6 +206,16 @@ def do_merge(db, match_id: int) -> dict:
 
     _record_decision(db, match, "merge")
 
+    if keep_pid is None or remove_pid is None:
+        # Mid-rebuild: property links are cleared and not yet rebuilt.
+        # The decision above IS recorded and will apply on the next
+        # rebuild — only the immediate merge is skipped.
+        raise HTTPException(
+            status_code=409,
+            detail="Listing not linked to a property (rebuild in "
+                   "progress?). Decision saved; it applies at the next "
+                   "rebuild.")
+
     if keep_pid == remove_pid:
         # Already the same property — just update the match tier
         db.table("matches").update({"tier": "merged"}).eq("id", match_id).execute()
