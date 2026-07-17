@@ -225,7 +225,7 @@ def test_admin_renders_queue(client, monkeypatch):
     r = client.get("/admin/review?key=sekrit&scope=intra")
     assert r.status_code == 200
     assert "House A" in r.text
-    assert 'name="decision_9"' in r.text          # batch radios
+    assert 'name="decision_1_2"' in r.text        # batch radios, pair-keyed
     assert "/admin/review/batch" in r.text        # one form, one confirm
 
 
@@ -234,12 +234,14 @@ def test_admin_batch_apply(client, monkeypatch):
     # dismiss path: fetch match (review tier) → update decision → update tier
     match = {"id": 9, "listing_a_id": 1, "listing_b_id": 2, "tier": "review"}
     use_db(monkeypatch, {
-        "matches": [FakeResult([match]), FakeResult([match])],
+        # pair lookup → match fetch → tier update (+ decision upsert)
+        "matches": [FakeResult([{"id": 9}]), FakeResult([match]),
+                    FakeResult([match])],
         "review_decisions": [FakeResult([])],
     })
     r = client.post("/admin/review/batch", data={
         "key": "sekrit", "scope": "intra", "category": "rent", "page": "2",
-        "decision_9": "dismiss", "decision_10": "skip",
+        "decision_1_2": "dismiss", "decision_3_4": "skip",
     }, follow_redirects=False)
     assert r.status_code == 303
     loc = r.headers["location"]

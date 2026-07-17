@@ -53,12 +53,13 @@
       <p class="meta">score {{ "%.3f" | format(m.score) }} ({{ m.scope }}) —
         img {{ m.image_score }} · price {{ m.price_score }} ·
         beds {{ m.beds_score }} · loc {{ m.location_score }}</p>
+      {% set pair = m.listing_a_id ~ "_" ~ m.listing_b_id %}
       <label class="pick pick-merge">
-        <input type="radio" name="decision_{{ m.id }}" value="merge"> Merge</label>
+        <input type="radio" name="decision_{{ pair }}" value="merge"> Merge</label>
       <label class="pick pick-dismiss">
-        <input type="radio" name="decision_{{ m.id }}" value="dismiss"> Dismiss</label>
+        <input type="radio" name="decision_{{ pair }}" value="dismiss"> Dismiss</label>
       <label class="pick">
-        <input type="radio" name="decision_{{ m.id }}" value="skip" checked> Skip</label>
+        <input type="radio" name="decision_{{ pair }}" value="skip" checked> Skip</label>
     </div>
   </div>
   {% else %}

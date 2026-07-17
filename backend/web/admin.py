@@ -134,16 +134,26 @@ async def admin_batch(request: Request):
     for name, value in form.items():
         if not name.startswith("decision_") or value == "skip":
             continue
+        # Keyed by LISTING PAIR (stable across rebuilds), not match id
+        # (wiped every rebuild — a nightly rebuild mid-triage used to
+        # invalidate every open decision). Resolve the pair's current
+        # match row at apply time.
         try:
-            match_id = int(name.split("_", 1)[1])
+            a_id, b_id = (int(x) for x in name[len("decision_"):].split("_"))
         except ValueError:
             continue
         try:
+            row = (db.table("matches").select("id")
+                   .eq("listing_a_id", a_id).eq("listing_b_id", b_id)
+                   .limit(1).execute())
+            if not row.data:
+                failed += 1
+                continue
             if value == "merge":
-                do_merge(db, match_id)
+                do_merge(db, row.data[0]["id"])
                 applied += 1
             elif value == "dismiss":
-                do_dismiss(db, match_id)
+                do_dismiss(db, row.data[0]["id"])
                 applied += 1
         except HTTPException:
             failed += 1
