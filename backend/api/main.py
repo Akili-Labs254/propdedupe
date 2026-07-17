@@ -43,6 +43,29 @@ app.include_router(segments_router)
 app.include_router(admin_router)
 app.mount("/static", StaticFiles(directory="backend/web/static"), name="static")
 
+# ── Human error pages for consumer routes ─────────────────────────
+# JSON API paths keep JSON errors; everything else (consumer pages)
+# renders a friendly HTML page instead of {"detail": ...}.
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi.responses import JSONResponse
+from backend.web.routes import templates as web_templates
+
+_API_PREFIXES = ("/properties", "/review", "/stats", "/health",
+                 "/docs", "/openapi", "/admin")
+
+
+@app.exception_handler(StarletteHTTPException)
+async def html_error_pages(request, exc):
+    if (request.url.path.startswith(_API_PREFIXES)
+            or exc.status_code not in (404, 500)):
+        return JSONResponse({"detail": exc.detail},
+                            status_code=exc.status_code)
+    return web_templates.TemplateResponse(
+        request, "error.html",
+        {"status_code": exc.status_code, "detail": exc.detail},
+        status_code=exc.status_code)
+
+
 @app.get("/health")
 def health():
     """Health check — confirms the API is running (moved from / when the

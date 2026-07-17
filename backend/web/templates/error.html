@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block title %}{{ status_code }} — PropDeDupe{% endblock %}
+
+{% block content %}
+<section class="hero">
+  {% if status_code == 404 %}
+  <h1>That property isn't here</h1>
+  <p>It may have been merged with a duplicate, or the advert expired and
+  was removed — that's rather the point of this site. The search has
+  everything that's live right now.</p>
+  {% else %}
+  <h1>Something went wrong</h1>
+  <p>Not your fault. Try again in a moment.</p>
+  {% endif %}
+  <p><a href="/">← Back to search</a></p>
+</section>
+{% endblock %}

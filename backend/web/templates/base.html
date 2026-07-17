@@ -5,6 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}PropDeDupe — Nairobi property search, deduplicated{% endblock %}</title>
   <meta name="description" content="{% block description %}Search every Nairobi property listing in one place — deduplicated across BuyRentKenya and Property24, with stale listings removed.{% endblock %}">
+  {# Open Graph: what WhatsApp/Facebook show when a link is shared —
+     core GTM infrastructure, since distribution is group shares. #}
+  <meta property="og:site_name" content="PropDeDupe">
+  <meta property="og:type" content="website">
+  {% block og %}
+  <meta property="og:title" content="PropDeDupe — every Nairobi listing, once">
+  <meta property="og:description" content="One search across the property sites. Duplicates merged, expired adverts removed.">
+  {% endblock %}
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
   {% block head %}{% endblock %}
   <link rel="stylesheet" href="/static/style.css">
 </head>

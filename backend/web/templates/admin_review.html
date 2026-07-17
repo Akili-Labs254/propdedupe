@@ -44,7 +44,9 @@
           {% if l.bedrooms %} · {{ l.bedrooms }} bed{% endif %}
           {% if l.baths %} · {{ l.baths | int }} bath{% endif %}</p>
         <p class="meta">{{ l.location }}</p>
-        <a href="{{ l.url }}" target="_blank" rel="noopener">source ↗</a>
+        {# noreferrer: the admin URL carries the key — never leak it in
+           Referer headers to the source sites #}
+        <a href="{{ l.url }}" target="_blank" rel="noopener noreferrer">source ↗</a>
         {% else %}<em>listing missing</em>{% endif %}
       </div>
       {% endfor %}
