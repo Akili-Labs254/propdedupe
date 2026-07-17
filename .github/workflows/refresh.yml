@@ -1,0 +1,50 @@
+name: Scheduled refresh
+
+# Full pipeline: scrape (sale + capped rent) → hash new images → stale
+# detection → dedup rebuild. GitHub emails the repo owner automatically
+# when a run fails — that's the alerting.
+#
+# NOTE: the schedule only fires from the repo's DEFAULT branch (main).
+# Until dev is merged, trigger manually via workflow_dispatch (Actions
+# tab → Scheduled refresh → Run workflow), which works on any branch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_pages:
+        description: "Cap pages per scraper (smoke test, e.g. 2)"
+        required: false
+        default: ""
+
+concurrency:
+  group: refresh          # never two pipelines at once
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350   # hosted-runner hard limit is 360
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run refresh pipeline
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ -n "${{ inputs.max_pages }}" ]; then
+            python -u -m scripts.refresh --all --rent-max-pages 500 \
+              --max-pages "${{ inputs.max_pages }}"
+          else
+            python -u -m scripts.refresh --all --rent-max-pages 500
+          fi
