@@ -6,6 +6,7 @@ facts only, always link out to the source site, never rehost images
 (image URLs are hotlinked with a graceful fallback).
 """
 import math
+import os
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -16,6 +17,11 @@ from backend.db.client import get_client
 
 router = APIRouter(include_in_schema=False)
 templates = Jinja2Templates(directory="backend/web/templates")
+
+# Absolute base URL for canonicals and OG tags (crawlers and link
+# unfurlers want absolute URLs, not paths)
+templates.env.globals["BASE_URL"] = \
+    os.getenv("SITE_BASE_URL", "http://localhost:8000").rstrip("/")
 
 PER_PAGE = 24
 SOURCE_NAMES = {1: "BuyRentKenya", 2: "Property24"}

@@ -4,7 +4,7 @@
 {% block description %}Browse {{ cfg.plural | lower }} {{ cfg.action | lower }} across {{ suburbs | length }} Nairobi suburbs — every listing from every source, deduplicated, with stale adverts removed.{% endblock %}
 
 {% block head %}
-<link rel="canonical" href="/{{ cfg.prefix }}">
+<link rel="canonical" href="{{ BASE_URL }}/{{ cfg.prefix }}">
 {% endblock %}
 
 {% block content %}

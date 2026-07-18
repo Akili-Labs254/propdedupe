@@ -8,7 +8,7 @@
 {% block description %}{{ stats.property_count }} {{ page_title | lower }}{% if stats.min_price %}, from {{ stats.min_price | price }}{% if stats.median_price %} (median {{ stats.median_price | price }}){% endif %}{% endif %}. Deduplicated across every listing site, stale adverts removed.{% endblock %}
 
 {% block head %}
-<link rel="canonical" href="{{ base_path }}">
+<link rel="canonical" href="{{ BASE_URL }}{{ base_path }}">
 {% endblock %}
 
 {% block content %}
