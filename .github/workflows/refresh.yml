@@ -46,11 +46,13 @@ jobs:
         # --sources brk: P24 blocks GitHub's datacenter IPs (sustained
         # 503s even with backoff — tested 2026-07-17). P24 is scraped
         # from a residential IP every few days:
-        #   python -m scripts.refresh --all --sources p24 --rent-max-pages 500
+        #   python -m scripts.refresh --all --sources p24 --rent-max-pages 1500
+        # (cap raised 500→1500 on 2026-07-18: disk at 27% post-launch,
+        # ~100MB per extra 1,000 pages, targets ~55% of the free tier)
         run: |
           if [ -n "${{ inputs.max_pages }}" ]; then
             python -u -m scripts.refresh --all --sources brk \
-              --rent-max-pages 500 --max-pages "${{ inputs.max_pages }}"
+              --rent-max-pages 1500 --max-pages "${{ inputs.max_pages }}"
           else
-            python -u -m scripts.refresh --all --sources brk --rent-max-pages 500
+            python -u -m scripts.refresh --all --sources brk --rent-max-pages 1500
           fi

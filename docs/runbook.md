@@ -16,7 +16,9 @@ we've actually hit mean. Update this when something new bites.
 - P24 BLOCKS GitHub's datacenter IPs (sustained 503s even with backoff,
   tested 2026-07-17), so CI runs `--sources brk`. P24 is scraped from a
   residential IP every 2-3 days:
-  `caffeinate -i python -u -m scripts.refresh --all --sources p24 --rent-max-pages 500`
+  `caffeinate -i python -u -m scripts.refresh --all --sources p24 --rent-max-pages 1500`
+  (cap 500→1500 on 2026-07-18; raise further / upgrade Supabase tier
+  when DB disk crosses ~70%)
   The stale guard auto-skips whichever source a run didn't scrape.
 
 ## Regular operations
