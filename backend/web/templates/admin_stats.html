@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Dedup stats | Fikia admin{% endblock %}
+{% block head %}<meta name="robots" content="noindex">{% endblock %}
+
+{% block content %}
+<h1>Dedup health</h1>
+<p class="intro"><a href="/admin/review?key={{ key }}">→ review queue</a></p>
+
+<h2>Duplication rate by category</h2>
+<table class="facts">
+  <tr><th>category</th><th>status</th><th>listings</th><th>properties</th><th>dup %</th></tr>
+  {% for r in dedup %}
+  <tr>
+    <td>{{ r.category }}</td><td>{{ r.status }}</td>
+    <td>{{ "{:,}".format(r.listings) }}</td>
+    <td>{{ "{:,}".format(r.properties) }}</td>
+    <td><strong>{{ r.dup_pct }}%</strong></td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2>Most-duplicated properties</h2>
+<table class="facts">
+  <tr><th>listings</th><th>sources</th><th>property</th><th>where</th><th>cat</th></tr>
+  {% for w in worst %}
+  <tr>
+    <td><strong>{{ w.listing_count }}</strong></td>
+    <td>{{ w.source_cnt }}</td>
+    <td><a href="/property/{{ w.slug }}" target="_blank">{{ w.title }}</a></td>
+    <td>{{ w.suburb or "—" }}</td>
+    <td>{{ w.category or "—" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2>Match queue composition</h2>
+<table class="facts">
+  <tr><th>scope</th><th>tier</th><th>count</th></tr>
+  {% for q in queue %}
+  <tr><td>{{ q.scope }}</td><td>{{ q.tier }}</td><td>{{ "{:,}".format(q.count) }}</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

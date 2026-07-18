@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Fikia — Nairobi property search, deduplicated{% endblock %}</title>
+  <meta name="description" content="{% block description %}Search every Nairobi property listing in one place — deduplicated across BuyRentKenya and Property24, with stale listings removed.{% endblock %}">
+  {# Open Graph: what WhatsApp/Facebook show when a link is shared —
+     core GTM infrastructure, since distribution is group shares. #}
+  <meta property="og:site_name" content="Fikia">
+  <meta property="og:type" content="website">
+  {% block og %}
+  <meta property="og:title" content="Fikia — every Nairobi listing, once">
+  <meta property="og:description" content="One search across the property sites. Duplicates merged, expired adverts removed. Umefika.">
+  {% endblock %}
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  {% block head %}{% endblock %}
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="logo" href="/">Fikia</a>
+    <span class="tagline">Every listing. Once. Umefika.</span>
+  </header>
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">
+    <p>Fikia is a search index. Listings belong to their source
+    sites — we link you to the original advert to enquire.</p>
+  </footer>
+</body>
+</html>

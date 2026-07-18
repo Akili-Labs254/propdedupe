@@ -19,7 +19,7 @@ real-world property.
 
 ## What it does
 
-Scrapes about 13,500 listings from two Nairobi property sites and
+Scrapes about 13,500 listings at initial scrape (July 2026) from two Nairobi property sites and
 deduplicates them down to roughly 8,950 distinct properties — **about 34%
 were duplicates.**
 

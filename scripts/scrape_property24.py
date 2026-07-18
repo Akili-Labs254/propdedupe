@@ -1,31 +1,74 @@
+"""Scrape Property24 Kenya listing pages into the listings table.
+
+Pagination is dynamic: stops after 2 consecutive empty pages (page counts
+drift as the site changes), with a hard cap as a runaway guard.
+
+Run: python -m scripts.scrape_property24
+"""
+from datetime import datetime
+from typing import Optional
+
 from backend.scraper.property24 import Property24Scraper
 from backend.db.save import save_listings
-from datetime import datetime
 
-BASE_URL = "https://www.property24.co.ke/houses-for-sale-in-nairobi-p95"
+# Category → listing index URL. Rent wedge = apartments/flats.
+CATEGORY_URLS = {
+    "sale": "https://www.property24.co.ke/houses-for-sale-in-nairobi-p95",
+    "rent": "https://www.property24.co.ke/apartments-flats-to-rent-in-nairobi-p95",
+}
 SOURCE_ID = 2  # Property24 Kenya — second row inserted into sources
-TOTAL_PAGES = 579
-
+HARD_PAGE_CAP = 6000         # runaway guard (P24 rent is thousands of pages)
+MAX_CONSECUTIVE_EMPTY = 2    # stop after this many empty pages in a row
 
 
 def log(msg):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
 
-def main():
-    scraper = Property24Scraper()
 
-    for page in range(1, TOTAL_PAGES + 1):
-        url = BASE_URL if page == 1 else f"{BASE_URL}?Page={page}"
-        log(f"Scraping page {page}/{TOTAL_PAGES}...")
+def run(max_pages: Optional[int] = None, category: str = "sale") -> int:
+    """Scrape all pages (or up to max_pages) and return listings saved."""
+    base_url = CATEGORY_URLS[category]
+    scraper = Property24Scraper()
+    saved = 0
+    empty_streak = 0
+    fail_streak = 0
+    cap = min(max_pages, HARD_PAGE_CAP) if max_pages else HARD_PAGE_CAP
+
+    for page in range(1, cap + 1):
+        url = base_url if page == 1 else f"{base_url}?Page={page}"
+        log(f"[P24/{category}] page {page}...")
 
         try:
             html = scraper.fetch(url)
             listings = scraper.parse(html)
-            save_listings(listings, SOURCE_ID)
-            print(f"  Saved {len(listings)} listings")
+            fail_streak = 0
         except Exception as e:
-            print(f"  Failed: {e}, skipping...")
+            # Consecutive failures = end of pagination (sites 404 or
+            # error past the last page rather than serving empty pages).
+            fail_streak += 1
+            print(f"  Failed: {e} (fail streak {fail_streak})")
+            if fail_streak >= 3:
+                log(f"[P24/{category}] {fail_streak} failures in a row — done.")
+                break
             continue
 
+        if not listings:
+            empty_streak += 1
+            print(f"  0 listings (empty streak {empty_streak})")
+            if empty_streak >= MAX_CONSECUTIVE_EMPTY:
+                log(f"[P24] {empty_streak} empty pages in a row — done.")
+                break
+            continue
+
+        empty_streak = 0
+        save_listings(listings, SOURCE_ID, category=category)
+        saved += len(listings)
+        print(f"  Saved {len(listings)} listings ({saved} total)")
+
+    log(f"[P24/{category}] finished: {saved} listings saved.")
+    return saved
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+    run(category="rent" if "--rent" in sys.argv else "sale")

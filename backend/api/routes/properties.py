@@ -15,6 +15,7 @@ def list_properties(
     max_price: Optional[float] = Query(None, description="Maximum price (KSh)"),
     bedrooms: Optional[int] = Query(None, description="Exact bedroom count"),
     location: Optional[str] = Query(None, description="Location substring match"),
+    sort: str = Query("id", description="'id' or 'newest' (first crawled)"),
 ):
     """List deduplicated properties with optional filters and pagination."""
     db = get_client()
@@ -34,7 +35,11 @@ def list_properties(
 
     # Pagination — offset-based
     offset = (page - 1) * per_page
-    query = query.order("id").range(offset, offset + per_page - 1)
+    if sort == "newest":
+        query = query.order("first_seen", desc=True).order("id", desc=True)
+    else:
+        query = query.order("id")
+    query = query.range(offset, offset + per_page - 1)
 
     result = query.execute()
 

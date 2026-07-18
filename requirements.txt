@@ -7,6 +7,10 @@ supabase
 imagehash
 fastapi
 uvicorn[standard]
+jinja2
+python-multipart   # form posts (admin review UI)
+pytest             # tests/
+httpx              # FastAPI TestClient
 
 # ── Planned (uncomment as we reach each stage) ──────────────────────────
 # rapidfuzz            # text similarity for matching titles

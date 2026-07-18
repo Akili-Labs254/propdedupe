@@ -1,0 +1,143 @@
+/* PropDeDupe — minimal, fast, no framework. */
+:root {
+  --ink: #1a1d21;
+  --muted: #6b7280;
+  --accent: #0d6e5f;
+  --bg: #fafaf8;
+  --card: #ffffff;
+  --line: #e5e7eb;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  line-height: 1.5;
+}
+
+main { max-width: 1080px; margin: 0 auto; padding: 0 1rem 3rem; }
+
+/* header / footer */
+.site-header {
+  display: flex; align-items: baseline; gap: 1rem;
+  padding: 1rem; max-width: 1080px; margin: 0 auto;
+}
+.logo { font-size: 1.3rem; font-weight: 700; color: var(--accent); text-decoration: none; }
+.tagline { color: var(--muted); font-size: 0.9rem; }
+.site-footer {
+  border-top: 1px solid var(--line);
+  color: var(--muted); font-size: 0.85rem;
+  padding: 1.5rem 1rem; max-width: 1080px; margin: 0 auto;
+}
+
+/* search */
+.search-box form { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; }
+.search-box input, .search-box select {
+  padding: 0.6rem 0.8rem; border: 1px solid var(--line);
+  border-radius: 6px; font-size: 0.95rem; background: var(--card);
+}
+.search-box input[type="text"] { flex: 2 1 200px; }
+.search-box input[type="number"] { flex: 1 1 120px; }
+.search-box button {
+  padding: 0.6rem 1.4rem; background: var(--accent); color: #fff;
+  border: none; border-radius: 6px; font-size: 0.95rem; cursor: pointer;
+}
+.result-count { color: var(--muted); }
+
+/* results grid */
+.grid {
+  display: grid; gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+  overflow: hidden; text-decoration: none; color: inherit;
+  transition: box-shadow 0.15s;
+}
+.card:hover { box-shadow: 0 4px 14px rgba(0,0,0,0.08); }
+.card img { width: 100%; height: 160px; object-fit: cover; display: block; }
+.card-body { padding: 0.8rem; }
+.card .price { font-weight: 700; color: var(--accent); }
+.card h2 { font-size: 0.95rem; margin: 0.3rem 0; font-weight: 600; }
+.card .meta, .card .location { color: var(--muted); font-size: 0.85rem; margin: 0.15rem 0; }
+.badge {
+  display: inline-block; margin-top: 0.4rem; padding: 0.15rem 0.5rem;
+  background: #e6f4f1; color: var(--accent);
+  border-radius: 999px; font-size: 0.75rem; font-weight: 600;
+}
+
+/* pagination */
+.pagination {
+  display: flex; gap: 1rem; justify-content: center; align-items: center;
+  margin-top: 2rem; color: var(--muted);
+}
+.pagination a { color: var(--accent); text-decoration: none; font-weight: 600; }
+
+/* property detail */
+.property .hero {
+  width: 100%; max-height: 420px; object-fit: cover;
+  border-radius: 8px; margin: 1rem 0;
+}
+.property h1 { font-size: 1.5rem; margin-bottom: 0.2rem; }
+.price-large { font-size: 1.4rem; font-weight: 700; color: var(--accent); margin-top: 0; }
+.facts { border-collapse: collapse; margin: 1rem 0; }
+.facts th, .facts td { text-align: left; padding: 0.4rem 1.2rem 0.4rem 0; }
+.facts th { color: var(--muted); font-weight: 500; }
+
+.sources { margin-top: 2rem; }
+.sources .hint { color: var(--muted); font-size: 0.9rem; }
+.source-link {
+  display: flex; gap: 1rem; align-items: baseline;
+  padding: 0.8rem 1rem; margin: 0.5rem 0;
+  background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+  text-decoration: none; color: inherit;
+}
+.source-link:hover { border-color: var(--accent); }
+.source-link.inactive { opacity: 0.6; }
+.stale-note { color: var(--muted); font-size: 0.8rem; font-style: italic; }
+
+/* segment pages */
+.crumbs { color: var(--muted); font-size: 0.9rem; margin-top: 1rem; }
+.crumbs a { color: var(--accent); text-decoration: none; }
+.intro { color: var(--muted); max-width: 640px; }
+.sub-segments, .nearby nav { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; }
+.sub-segments a, .nearby nav a {
+  padding: 0.35rem 0.8rem; background: var(--card);
+  border: 1px solid var(--line); border-radius: 999px;
+  text-decoration: none; color: var(--ink); font-size: 0.85rem;
+}
+.sub-segments a:hover, .nearby nav a:hover { border-color: var(--accent); }
+.nearby { margin-top: 2.5rem; }
+.nearby h2 { font-size: 1.1rem; }
+.suburb-list { list-style: none; padding: 0; columns: 3 220px; }
+.suburb-list li { margin: 0.35rem 0; break-inside: avoid; }
+.suburb-list a { color: var(--accent); text-decoration: none; font-weight: 600; }
+.suburb-list .count { color: var(--muted); font-size: 0.85rem; margin-left: 0.4rem; }
+
+/* admin review */
+.pair { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+.pair-listings { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.pair-card img { width: 100%; height: 140px; object-fit: cover; border-radius: 6px; }
+.pair-card .meta { color: var(--muted); font-size: 0.85rem; margin: 0.15rem 0; }
+.pair-actions { display: flex; gap: 0.6rem; align-items: center; margin-top: 0.8rem; flex-wrap: wrap; }
+.pair-actions form { display: inline; }
+.btn-merge, .btn-dismiss { padding: 0.45rem 1rem; border: none; border-radius: 6px; cursor: pointer; font-size: 0.9rem; }
+.btn-merge { background: var(--accent); color: #fff; }
+.btn-dismiss { background: #eee; color: var(--ink); }
+
+/* hero */
+.hero { margin: 1.5rem 0 0.5rem; }
+.hero h1 { font-size: 1.6rem; margin-bottom: 0.3rem; }
+.hero p { color: var(--muted); max-width: 640px; margin-top: 0; }
+
+/* batch triage */
+.flash { background: #e6f4f1; color: var(--accent); padding: 0.5rem 0.9rem; border-radius: 6px; font-weight: 600; }
+.pick { padding: 0.35rem 0.9rem; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; font-size: 0.9rem; background: var(--card); }
+.pick input { margin-right: 0.3rem; }
+.pick-merge:has(input:checked) { background: var(--accent); color: #fff; border-color: var(--accent); }
+.pick-dismiss:has(input:checked) { background: #b3372f; color: #fff; border-color: #b3372f; }
+.batch-bar { position: sticky; bottom: 0; display: flex; gap: 1rem; align-items: center; justify-content: flex-end; padding: 0.8rem 1rem; background: var(--bg); border-top: 1px solid var(--line); }
+.batch-bar span { color: var(--muted); font-size: 0.9rem; }

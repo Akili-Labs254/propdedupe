@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}{{ cfg.plural }} {{ cfg.action }} in Nairobi by Suburb | Fikia{% endblock %}
+{% block description %}Browse {{ cfg.plural | lower }} {{ cfg.action | lower }} across {{ suburbs | length }} Nairobi suburbs — every listing from every source, deduplicated, with stale adverts removed.{% endblock %}
+
+{% block head %}
+<link rel="canonical" href="/{{ cfg.prefix }}">
+{% endblock %}
+
+{% block content %}
+<h1>{{ cfg.plural }} {{ cfg.action | lower }} in Nairobi, by suburb</h1>
+<p class="intro">Every suburb below links to a live, deduplicated list —
+one entry per real property, however many sites it's advertised on.</p>
+
+<ul class="suburb-list">
+  {% for s in suburbs %}
+  <li>
+    <a href="/{{ cfg.prefix }}/{{ s.suburb }}">{{ display_name(s.suburb) }}</a>
+    <span class="count">{{ s.property_count }} properties</span>
+  </li>
+  {% endfor %}
+</ul>
+{% endblock %}

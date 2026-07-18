@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}Review queue ({{ total }}) | Fikia admin{% endblock %}
+
+{% block head %}<meta name="robots" content="noindex">{% endblock %}
+
+{% block content %}
+<h1>Review queue</h1>
+{% if applied is not none %}
+<p class="flash">Applied {{ applied }} decision{{ "s" if applied != 1 }}{% if failed %} · {{ failed }} failed (likely already resolved){% endif %}.</p>
+{% endif %}
+<p class="intro">{{ "{:,}".format(total) }} pairs waiting.
+  <a href="/admin/stats?key={{ key }}">→ dedup stats</a><br>
+  Scope:
+  <a href="/admin/review?key={{ key }}{% if category %}&category={{ category }}{% endif %}">all</a> ·
+  <a href="/admin/review?key={{ key }}&scope=cross{% if category %}&category={{ category }}{% endif %}">cross</a> ·
+  <a href="/admin/review?key={{ key }}&scope=intra{% if category %}&category={{ category }}{% endif %}">intra</a>
+  &nbsp;|&nbsp; Category:
+  <a href="/admin/review?key={{ key }}{% if scope %}&scope={{ scope }}{% endif %}">all</a> ·
+  <a href="/admin/review?key={{ key }}&category=sale{% if scope %}&scope={{ scope }}{% endif %}">sale</a> ·
+  <a href="/admin/review?key={{ key }}&category=rent{% if scope %}&scope={{ scope }}{% endif %}">rent</a>
+  {% if scope or category %}(showing {{ scope or "all" }} / {{ category or "all" }}){% endif %}
+</p>
+
+<form method="post" action="/admin/review/batch" id="batch-form">
+  <input type="hidden" name="key" value="{{ key }}">
+  <input type="hidden" name="scope" value="{{ scope }}">
+  <input type="hidden" name="category" value="{{ category }}">
+  <input type="hidden" name="page" value="{{ page }}">
+
+  {% for m in matches %}
+  <div class="pair">
+    <div class="pair-listings">
+      {% for l in [m.listing_a, m.listing_b] %}
+      <div class="pair-card">
+        {% if l %}
+        {% if l.image_url %}
+        <img src="{{ l.image_url }}" loading="lazy" onerror="this.style.display='none'">
+        {% endif %}
+        <strong>{{ l.title }}</strong>
+        <p class="meta">{{ source_names.get(l.source_id, "?") }}
+          {% if l.status != "active" %}<em>({{ l.status }})</em>{% endif %}</p>
+        <p class="meta">{{ l.price | price }}
+          {% if l.bedrooms %} · {{ l.bedrooms }} bed{% endif %}
+          {% if l.baths %} · {{ l.baths | int }} bath{% endif %}</p>
+        <p class="meta">{{ l.location }}</p>
+        {# noreferrer: the admin URL carries the key — never leak it in
+           Referer headers to the source sites #}
+        <a href="{{ l.url }}" target="_blank" rel="noopener noreferrer">source ↗</a>
+        {% else %}<em>listing missing</em>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    <div class="pair-actions">
+      <p class="meta">score {{ "%.3f" | format(m.score) }} ({{ m.scope }}) —
+        img {{ m.image_score }} · price {{ m.price_score }} ·
+        beds {{ m.beds_score }} · loc {{ m.location_score }}</p>
+      {% set pair = m.listing_a_id ~ "_" ~ m.listing_b_id %}
+      <label class="pick pick-merge">
+        <input type="radio" name="decision_{{ pair }}" value="merge"> Merge</label>
+      <label class="pick pick-dismiss">
+        <input type="radio" name="decision_{{ pair }}" value="dismiss"> Dismiss</label>
+      <label class="pick">
+        <input type="radio" name="decision_{{ pair }}" value="skip" checked> Skip</label>
+    </div>
+  </div>
+  {% else %}
+  <p>Queue empty. Nice.</p>
+  {% endfor %}
+
+  {% if matches %}
+  <div class="batch-bar">
+    <span id="batch-count">0 decisions selected</span>
+    <button type="submit" class="btn-merge">Confirm &amp; apply</button>
+  </div>
+  {% endif %}
+</form>
+
+{% if total_pages > 1 %}
+<nav class="pagination">
+  {% if page > 1 %}<a href="/admin/review?key={{ key }}&page={{ page - 1 }}{% if scope %}&scope={{ scope }}{% endif %}{% if category %}&category={{ category }}{% endif %}">&larr; Previous</a>{% endif %}
+  <span>Page {{ page }} of {{ total_pages }}</span>
+  {% if page < total_pages %}<a href="/admin/review?key={{ key }}&page={{ page + 1 }}{% if scope %}&scope={{ scope }}{% endif %}{% if category %}&category={{ category }}{% endif %}">Next &rarr;</a>{% endif %}
+</nav>
+{% endif %}
+
+<script>
+// Live count on the confirm button; plain form-post still works without JS.
+document.getElementById("batch-form").addEventListener("change", function () {
+  var n = document.querySelectorAll(
+    '#batch-form input[type=radio]:checked:not([value=skip])').length;
+  document.getElementById("batch-count").textContent =
+    n + " decision" + (n === 1 ? "" : "s") + " selected";
+});
+</script>
+{% endblock %}
