@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 
-{% block title %}{{ p.title }} — {{ p.location }} | PropDeDupe{% endblock %}
+{% block title %}{{ p.title }} — {{ p.location }} | Fikia{% endblock %}
 {% block description %}{{ p.title }} in {{ p.location }}. {{ p.price | price }}{% if p.bedrooms %}, {{ p.bedrooms }} bedrooms{% endif %}{% if p.bathrooms %}, {{ p.bathrooms | int }} bathrooms{% endif %}. Compare the original listings.{% endblock %}
 
 {% block og %}
 <meta property="og:title" content="{{ p.title }} — {{ p | price_range }}">
-<meta property="og:description" content="{{ p.location }}{% if p.bedrooms %} · {{ p.bedrooms }} bed{% endif %}{% if p.bathrooms %} · {{ p.bathrooms | int }} bath{% endif %}. Compare every listing of this property on PropDeDupe.">
+<meta property="og:description" content="{{ p.location }}{% if p.bedrooms %} · {{ p.bedrooms }} bed{% endif %}{% if p.bathrooms %} · {{ p.bathrooms | int }} bath{% endif %}. Compare every listing of this property on Fikia.">
 {% if p.image_url %}<meta property="og:image" content="{{ p.image_url }}">{% endif %}
 {% endblock %}
 
