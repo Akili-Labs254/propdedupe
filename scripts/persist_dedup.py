@@ -498,7 +498,7 @@ def main():
     # Batch insert in chunks (Supabase payload size limit)
     for i in range(0, len(match_rows), 50):
         chunk = match_rows[i:i + 50]
-        db.table("matches").insert(chunk).execute()
+        _with_retry(lambda c=chunk: db.table("matches").insert(c).execute())
     print(f"  Inserted {len(match_rows)} match rows.")
 
     # ── Step 1.5: Intra-source pairs ─────────────────────────────
