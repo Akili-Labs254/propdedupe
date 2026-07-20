@@ -74,7 +74,8 @@ def fetch_properties(db, suburb: str, category: str,
                      bedrooms: Optional[int], page: int):
     q = (db.table("properties")
          .select("title, slug, price, price_min, price_max, location, "
-                 "bedrooms, bathrooms, size_sqm, image_url, source_count, "
+                 "bedrooms, bathrooms, beds_min, beds_max, baths_min, "
+                 "baths_max, size_sqm, image_url, source_count, "
                  "category", count="exact")
          .eq("status", "active")
          .eq("category", category)

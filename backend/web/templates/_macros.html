@@ -8,9 +8,11 @@
     <span class="price">{{ prop | price_range }}</span>
     <h2>{{ prop.title }}</h2>
     <p class="meta">
-      {% if prop.bedrooms %}{{ prop.bedrooms }} bed{% endif %}
-      {% if prop.bathrooms %} · {{ prop.bathrooms | int }} bath{% endif %}
-      {% if prop.size_sqm %} · {{ prop.size_sqm | int }} m²{% endif %}
+      {%- set beds = prop | beds_range -%}
+      {%- set baths = prop | baths_range -%}
+      {{ beds }}
+      {%- if baths %}{% if beds %} · {% endif %}{{ baths }}{% endif -%}
+      {%- if prop.size_sqm %}{% if beds or baths %} · {% endif %}{{ prop.size_sqm | int }} m²{% endif -%}
     </p>
     <p class="location">{{ prop.location }}</p>
     {% if prop.source_count > 1 %}

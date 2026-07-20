@@ -17,6 +17,13 @@ Rough order within each section = leverage per unit of effort.
   value — nobody else surfaces this reliably.
 - **Rent price presets** ("under 30k / 30–60k / 60–100k") — renters
   think in bands, not free-text mins.
+- **Bedroom ranges on merged properties** — sources often disagree on
+  bed count for the same house (DSQ counted or not: "4 bed" vs "5
+  bed"). Mirror the price_min/max pattern: beds_min/beds_max columns,
+  cards show "4–5 bed" on disagreement, detail page explains. Display
+  only — search keeps filtering on the primary count (same as price).
+  Data mostly arises from manual merges (the beds gate blocks
+  auto-merging differing counts by design).
 
 ## Similarity & discovery
 
@@ -58,6 +65,14 @@ Rough order within each section = leverage per unit of effort.
 - **Suburb price index** — median price / price-per-m² per suburb per
   month from the stats view; a public "Nairobi rent index" page is an
   SEO + shareability magnet and costs one view + one template.
+- **Public market analytics page ("Trends")** — the index grown into a
+  destination: per-suburb median trends over time, rent vs sale, most/
+  least expensive suburbs, supply counts, month-over-month movement.
+  Powered by monthly snapshots of suburb_stats (start snapshotting
+  EARLY — the page's value is the time axis). Journalist/content bait.
+- **Per-property price history** — timeline on the property page from
+  price_history ("listed at 85k in June, now 76k"). Buyer-side
+  negotiation gold; pairs with the price-drop badge.
 
 ## Retention
 

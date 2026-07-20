@@ -51,6 +51,30 @@ def format_price_range(p) -> str:
 templates.env.filters["price_range"] = format_price_range
 
 
+def format_beds_range(p) -> str:
+    """Single bed count when sources agree, '4–5 bed' when they don't.
+    Returns '' when unknown so the card meta can compose separators."""
+    lo, hi = p.get("beds_min"), p.get("beds_max")
+    if lo and hi and lo != hi:
+        return f"{int(lo)}–{int(hi)} bed"
+    base = p.get("bedrooms") or lo
+    return f"{int(base)} bed" if base else ""
+
+
+def format_baths_range(p) -> str:
+    """Single bath count when sources agree, '2–3 bath' when they don't.
+    Returns '' when unknown so the card meta can compose separators."""
+    lo, hi = p.get("baths_min"), p.get("baths_max")
+    if lo and hi and lo != hi:
+        return f"{int(lo)}–{int(hi)} bath"
+    base = p.get("bathrooms") or lo
+    return f"{int(base)} bath" if base else ""
+
+
+templates.env.filters["beds_range"] = format_beds_range
+templates.env.filters["baths_range"] = format_baths_range
+
+
 def _opt_int(value: Optional[str]) -> Optional[int]:
     """HTML forms submit empty fields as '' — treat those (and junk)
     as 'no filter' instead of letting FastAPI 422 the whole request."""
@@ -83,7 +107,8 @@ def home(
 
     q = (db.table("properties")
          .select("title, slug, price, price_min, price_max, location, "
-                 "bedrooms, bathrooms, size_sqm, image_url, source_count, "
+                 "bedrooms, bathrooms, beds_min, beds_max, baths_min, "
+                 "baths_max, size_sqm, image_url, source_count, "
                  "category", count="exact")
          .eq("status", "active")
          .eq("category", category))

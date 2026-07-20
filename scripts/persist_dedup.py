@@ -238,6 +238,22 @@ def price_range(member_rows: List[dict]) -> dict:
     return {"price_min": min(prices), "price_max": max(prices)}
 
 
+def beds_baths_range(member_rows: List[dict]) -> dict:
+    """Min/max bed and bath counts across member listings — sources
+    sometimes disagree (a DSQ / domestic-staff room counted or not), and
+    the range is information only an aggregator has. Display only: search
+    still filters on the property's primary bedrooms/bathrooms, same as
+    price_min/max vs price."""
+    beds = [int(r["bedrooms"]) for r in member_rows if r.get("bedrooms")]
+    baths = [float(r["baths"]) for r in member_rows if r.get("baths")]
+    return {
+        "beds_min": min(beds) if beds else None,
+        "beds_max": max(beds) if beds else None,
+        "baths_min": min(baths) if baths else None,
+        "baths_max": max(baths) if baths else None,
+    }
+
+
 def link_batch(db, pairs: List[dict]):
     """Bulk listing→property linking via the link_listings RPC
     (one round-trip per chunk instead of one per listing)."""
@@ -311,6 +327,7 @@ def create_singleton_properties(db, alloc: SlugAllocator,
                 "suburb": suburb_of(row),
                 "category": row.get("category") or "sale",
                 **price_range([row]),
+                **beds_baths_range([row]),
             })
 
         result = _with_retry(
@@ -635,6 +652,7 @@ def main():
             "suburb": suburb_of(primary),
             "category": primary.get("category") or "sale",
             **price_range(member_rows),
+            **beds_baths_range(member_rows),
         }
         result = _with_retry(
             lambda pd=prop_data: db.table("properties").insert(pd).execute())
@@ -731,6 +749,7 @@ def main():
                 "suburb": suburb_of(rep),
                 "category": rep.get("category") or "sale",
                 **price_range(members),
+                **beds_baths_range(members),
             }
             result = _with_retry(
                 lambda pd=prop_data: db.table("properties").insert(pd).execute())

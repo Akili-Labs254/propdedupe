@@ -46,11 +46,18 @@
   <p class="hint">Sources list this property at different prices — see
   the original listings below.</p>
   {% endif %}
+  {% if (p.beds_min and p.beds_max and p.beds_min != p.beds_max) or (p.baths_min and p.baths_max and p.baths_min != p.baths_max) %}
+  <p class="hint">Sources describe this property with different bed/bath
+  counts — a domestic-staff room (DSQ) may be counted or not. See the
+  original listings below.</p>
+  {% endif %}
 
   <table class="facts">
     <tr><th>Location</th><td>{{ p.location or "—" }}</td></tr>
-    {% if p.bedrooms %}<tr><th>Bedrooms</th><td>{{ p.bedrooms }}</td></tr>{% endif %}
-    {% if p.bathrooms %}<tr><th>Bathrooms</th><td>{{ p.bathrooms | int }}</td></tr>{% endif %}
+    {% if p.beds_min and p.beds_max and p.beds_min != p.beds_max %}<tr><th>Bedrooms</th><td>{{ p.beds_min | int }}–{{ p.beds_max | int }}</td></tr>
+    {% elif p.bedrooms %}<tr><th>Bedrooms</th><td>{{ p.bedrooms }}</td></tr>{% endif %}
+    {% if p.baths_min and p.baths_max and p.baths_min != p.baths_max %}<tr><th>Bathrooms</th><td>{{ p.baths_min | int }}–{{ p.baths_max | int }}</td></tr>
+    {% elif p.bathrooms %}<tr><th>Bathrooms</th><td>{{ p.bathrooms | int }}</td></tr>{% endif %}
     {% if p.size_sqm %}<tr><th>Size</th><td>{{ p.size_sqm | int }} m²</td></tr>{% endif %}
     <tr><th>Found on</th><td>{{ p.source_count }} source site{{ "s" if p.source_count > 1 }}</td></tr>
   </table>
