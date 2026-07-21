@@ -200,6 +200,14 @@ def stage_stale(db, run_start, scrape_results=None, force=False):
     delist_cutoff = (run_start - timedelta(days=DELIST_DAYS)).isoformat()
 
     for sid, name in ((1, "BRK"), (2, "P24")):
+        # A scrape ran but this source wasn't attempted (e.g. CI does BRK
+        # only — P24 blocks datacenter IPs). It has no "seen this run"
+        # signal, so staling it would mark its ENTIRE active set stale.
+        # Skip it. (scrape_results is None only in --stale resume mode,
+        # where the caller passes an explicit cutoff on purpose.)
+        if scrape_results is not None and sid not in scrape_results:
+            print(f"  {name}: not scraped this run — skipping stale pass.")
+            continue
         if scrape_results and not force:
             saved, pre_active = scrape_results.get(sid, (0, 0, {}))[:2]
             if pre_active > 0 and saved < pre_active * MIN_SCRAPE_RATIO:
