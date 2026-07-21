@@ -247,7 +247,7 @@ def stage_dedup():
     # Hide stock placeholder images (auction signs etc.) — see
     # backend/db/admin_stats.sql. Non-fatal if the function is missing.
     try:
-        db = get_client()
+        db = get_client(timeout=600)
         res = db.rpc("hide_generic_images", {}).execute()
         print(f"  Generic images hidden on {res.data} properties")
     except Exception as e:
@@ -291,7 +291,7 @@ def main():
         parser.print_help()
         sys.exit(1)
 
-    db = get_client()
+    db = get_client(timeout=600)
     run_start = datetime.now(timezone.utc)
     print(f"Run started {run_start.isoformat()}")
 

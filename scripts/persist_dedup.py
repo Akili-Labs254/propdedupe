@@ -355,7 +355,7 @@ def create_singleton_properties(db, alloc: SlugAllocator,
 
 
 def main():
-    db = get_client()
+    db = get_client(timeout=600)  # bulk clears/writes run for minutes on free tier
 
     # Snapshot slug state BEFORE clearing — rebuilt properties inherit
     # the slugs their member listings carried (stable public URLs).
@@ -832,7 +832,7 @@ if __name__ == "__main__":
         # NULL), touching nothing already linked. Pre-claims every slug
         # already in the DB so generated slugs can't collide; the
         # pre-crash snapshot is gone, so no inheritance in this mode.
-        db = get_client()
+        db = get_client(timeout=600)
         alloc = SlugAllocator({})
         offset = 0
         while True:
