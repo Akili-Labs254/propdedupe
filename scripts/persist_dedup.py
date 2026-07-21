@@ -121,26 +121,32 @@ def clear_previous_results(db):
     """
     print("Clearing previous results...")
 
+    # These are big bulk writes: on a loaded free-tier box they can run
+    # longer than the HTTP client's read timeout even though Postgres
+    # completes them server-side. _with_retry re-issues on that timeout —
+    # the retry then finds the work already done (or a now-tiny remainder)
+    # and returns fast. Same pattern as every other hot call here.
+
     # 1. Unlink listings from properties
     #    Supabase client doesn't support UPDATE...SET without a filter,
     #    so we filter for non-null property_id
-    db.table("listings") \
-        .update({"property_id": None}) \
-        .not_.is_("property_id", "null") \
-        .execute()
+    _with_retry(lambda: db.table("listings")
+                .update({"property_id": None})
+                .not_.is_("property_id", "null")
+                .execute())
 
     # 2. Clear matches table
     #    Delete all rows — gt(id, 0) matches everything since IDs are positive
-    db.table("matches") \
-        .delete() \
-        .gt("id", 0) \
-        .execute()
+    _with_retry(lambda: db.table("matches")
+                .delete()
+                .gt("id", 0)
+                .execute())
 
     # 3. Clear properties table
-    db.table("properties") \
-        .delete() \
-        .gt("id", 0) \
-        .execute()
+    _with_retry(lambda: db.table("properties")
+                .delete()
+                .gt("id", 0)
+                .execute())
 
     print("  Done — tables cleared.")
 
