@@ -1,22 +1,36 @@
 name: Scheduled refresh
 
-# Full pipeline: scrape (sale + capped rent) → hash new images → stale
-# detection → dedup rebuild. GitHub emails the repo owner automatically
-# when a run fails — that's the alerting.
+# Two-tier schedule to spare the free-tier Disk IO budget (the full dedup
+# rebuild — clear + re-insert ~30k properties + ~18k matches + relink ~48k
+# listings — is the heavy IO consumer; user traffic is negligible):
 #
-# NOTE: the schedule only fires from the repo's DEFAULT branch (main).
-# Until dev is merged, trigger manually via workflow_dispatch (Actions
-# tab → Scheduled refresh → Run workflow), which works on any branch.
+#   LIGHT (daily, most days): scrape + hashes + stale. Keeps listings and
+#     staleness current at low IO cost. New listings don't reach the site
+#     until the next full rebuild — an acceptable 1-2 day lag.
+#   FULL (Mon/Wed/Fri): everything incl. the dedup rebuild that regenerates
+#     properties/matches and publishes new listings to the site.
+#
+# The two cron day-sets don't overlap, so exactly one run fires per day.
+# GitHub emails the repo owner when a run fails — that's the alerting.
+#
+# NOTE: schedules only fire from the default branch (main). Trigger any
+# branch manually via workflow_dispatch (Actions → Scheduled refresh →
+# Run workflow); manual runs are FULL unless you set dedup=false.
 
 on:
   schedule:
-    - cron: "0 1 * * *"   # daily 01:00 UTC = 04:00 Nairobi (low traffic)
+    - cron: "0 1 * * 0,2,4,6"   # Sun/Tue/Thu/Sat 01:00 UTC — LIGHT
+    - cron: "0 2 * * 1,3,5"     # Mon/Wed/Fri 02:00 UTC — FULL (dedup)
   workflow_dispatch:
     inputs:
       max_pages:
         description: "Cap pages per scraper (smoke test, e.g. 2)"
         required: false
         default: ""
+      dedup:
+        description: "Include the full dedup rebuild (set false for a light run)"
+        required: false
+        default: "true"
 
 concurrency:
   group: refresh          # never two pipelines at once
@@ -47,12 +61,31 @@ jobs:
         # 503s even with backoff — tested 2026-07-17). P24 is scraped
         # from a residential IP every few days:
         #   python -m scripts.refresh --all --sources p24 --rent-max-pages 1500
-        # (cap raised 500→1500 on 2026-07-18: disk at 27% post-launch,
-        # ~100MB per extra 1,000 pages, targets ~55% of the free tier)
         run: |
+          # Decide FULL (incl. dedup) vs LIGHT (scrape+hashes+stale).
+          #  - Mon/Wed/Fri 02:00 cron  -> FULL
+          #  - other cron days         -> LIGHT
+          #  - manual run              -> FULL unless dedup=false
+          FULL="false"
+          if [ "${{ github.event.schedule }}" = "0 2 * * 1,3,5" ]; then
+            FULL="true"
+          fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] \
+             && [ "${{ inputs.dedup }}" != "false" ]; then
+            FULL="true"
+          fi
+
+          MAXP=""
           if [ -n "${{ inputs.max_pages }}" ]; then
-            python -u -m scripts.refresh --all --sources brk \
-              --rent-max-pages 1500 --max-pages "${{ inputs.max_pages }}"
+            MAXP="--max-pages ${{ inputs.max_pages }}"
+          fi
+
+          if [ "$FULL" = "true" ]; then
+            echo ">> FULL pipeline (scrape + hashes + stale + dedup rebuild)"
+            python -u -m scripts.refresh --all \
+              --sources brk --rent-max-pages 1500 $MAXP
           else
-            python -u -m scripts.refresh --all --sources brk --rent-max-pages 1500
+            echo ">> LIGHT pipeline (scrape + hashes + stale; no dedup)"
+            python -u -m scripts.refresh --scrape --hashes --stale \
+              --sources brk --rent-max-pages 1500 $MAXP
           fi
