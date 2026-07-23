@@ -114,41 +114,63 @@ def pick_primary(listing_ids: List[int], details: Dict[int, dict]) -> dict:
     return candidates[0]
 
 
+CLEAR_CHUNK = 1000  # rows per clear request — small enough that even on a
+                    # throttled free-tier box each request finishes well
+                    # under Supabase's ~60s API-gateway upstream timeout.
+
+
+def _unlink_listings_chunked(db):
+    """NULL property_id on linked listings, one id-batch at a time.
+
+    A single full-table UPDATE (~48k rows) runs past the API gateway's
+    ~60s upstream limit on the free tier and 504s — no client timeout
+    helps, the gateway kills it. Batching keeps every request small and
+    fast. Each pass grabs the next `CLEAR_CHUNK` still-linked ids; the
+    filter shrinks as we null them, so we always fetch fresh rows.
+    """
+    total = 0
+    while True:
+        rows = _with_retry(lambda: db.table("listings").select("id")
+                           .not_.is_("property_id", "null")
+                           .order("id").limit(CLEAR_CHUNK).execute())
+        ids = [r["id"] for r in rows.data]
+        if not ids:
+            break
+        _with_retry(lambda ids=ids: db.table("listings")
+                    .update({"property_id": None}).in_("id", ids).execute())
+        total += len(ids)
+    return total
+
+
+def _clear_table_chunked(db, table):
+    """Delete every row from `table` in id-batches (same 60s-gateway
+    reason as _unlink_listings_chunked — a full-table DELETE 504s)."""
+    total = 0
+    while True:
+        rows = _with_retry(lambda: db.table(table).select("id")
+                           .order("id").limit(CLEAR_CHUNK).execute())
+        ids = [r["id"] for r in rows.data]
+        if not ids:
+            break
+        _with_retry(lambda ids=ids: db.table(table)
+                    .delete().in_("id", ids).execute())
+        total += len(ids)
+    return total
+
+
 def clear_previous_results(db):
     """Remove previous dedup results so the script is re-runnable.
 
-    Order matters: clear FKs before the rows they point to.
+    Order matters: unlink listings (clear the FK) BEFORE deleting the
+    properties they point to. All three are chunked — a single bulk
+    UPDATE/DELETE on the whole table exceeds Supabase's ~60s API-gateway
+    upstream timeout on the free tier and 504s.
     """
     print("Clearing previous results...")
-
-    # These are big bulk writes: on a loaded free-tier box they can run
-    # longer than the HTTP client's read timeout even though Postgres
-    # completes them server-side. _with_retry re-issues on that timeout —
-    # the retry then finds the work already done (or a now-tiny remainder)
-    # and returns fast. Same pattern as every other hot call here.
-
-    # 1. Unlink listings from properties
-    #    Supabase client doesn't support UPDATE...SET without a filter,
-    #    so we filter for non-null property_id
-    _with_retry(lambda: db.table("listings")
-                .update({"property_id": None})
-                .not_.is_("property_id", "null")
-                .execute())
-
-    # 2. Clear matches table
-    #    Delete all rows — gt(id, 0) matches everything since IDs are positive
-    _with_retry(lambda: db.table("matches")
-                .delete()
-                .gt("id", 0)
-                .execute())
-
-    # 3. Clear properties table
-    _with_retry(lambda: db.table("properties")
-                .delete()
-                .gt("id", 0)
-                .execute())
-
-    print("  Done — tables cleared.")
+    n = _unlink_listings_chunked(db)          # 1. unlink listings ← properties
+    _clear_table_chunked(db, "matches")       # 2. clear matches
+    _clear_table_chunked(db, "properties")    # 3. clear properties
+    print(f"  Done — tables cleared ({n} listings unlinked).")
 
 
 def snapshot_slug_state(db) -> Dict[int, str]:
