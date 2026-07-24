@@ -187,6 +187,29 @@ def stage_hashes(db):
 
 # ── stage: stale detection ───────────────────────────────────────────
 
+def _flip_status_chunked(db, sid, from_status, new_status,
+                         before_field, before_value, chunk=1000):
+    """Flip listing status in id-batches so no single request exceeds
+    Supabase's ~60s API-gateway upstream timeout. A full-table UPDATE
+    504s on the free tier — and a windowed P24 rescrape can stale
+    thousands of out-of-window rows at once. Returns the count flipped.
+    """
+    from scripts.persist_dedup import _with_retry
+    total = 0
+    while True:
+        q = _with_retry(lambda: db.table("listings").select("id")
+                        .eq("source_id", sid).eq("status", from_status)
+                        .lt(before_field, before_value)
+                        .order("id").limit(chunk).execute())
+        ids = [r["id"] for r in q.data]
+        if not ids:
+            break
+        _with_retry(lambda ids=ids: db.table("listings")
+                    .update({"status": new_status}).in_("id", ids).execute())
+        total += len(ids)
+    return total
+
+
 def stage_stale(db, run_start, scrape_results=None, force=False):
     """Flip active→stale (not seen this run) and stale→delisted (old).
 
@@ -217,24 +240,16 @@ def stage_stale(db, run_start, scrape_results=None, force=False):
                 continue
 
         # stale → delisted first (order matters: don't delist rows that
-        # only just went stale in this same pass)
-        r1 = (db.table("listings")
-              .update({"status": "delisted"})
-              .eq("source_id", sid)
-              .eq("status", "stale")
-              .lt("last_seen", delist_cutoff)
-              .execute())
+        # only just went stale in this same pass). Both chunked to stay
+        # under the 60s gateway limit.
+        n_delisted = _flip_status_chunked(
+            db, sid, "stale", "delisted", "last_seen", delist_cutoff)
 
         # active + not seen this run → stale
-        r2 = (db.table("listings")
-              .update({"status": "stale"})
-              .eq("source_id", sid)
-              .eq("status", "active")
-              .lt("last_seen", cutoff)
-              .execute())
+        n_stale = _flip_status_chunked(
+            db, sid, "active", "stale", "last_seen", cutoff)
 
-        print(f"  {name}: {len(r2.data or [])} → stale, "
-              f"{len(r1.data or [])} → delisted")
+        print(f"  {name}: {n_stale} → stale, {n_delisted} → delisted")
 
 
 # ── stage: dedup ─────────────────────────────────────────────────────
