@@ -11,12 +11,25 @@ Rough order within each section = leverage per unit of effort.
   "4–5 bed" when sources disagree, with a DSQ explainer. Display only;
   search still filters on the primary count. Mirrors price_min/max.
 
+- **Multi-word suburb URL slugs** (shipped July 2026) — suburb values are
+  stored lowercase-with-spaces and were interpolated raw into segment
+  paths, so the sitemap, homepage, suburb index, canonical tag,
+  pagination, breadcrumb, bed links and nearby links all emitted
+  `/houses-for-sale/kiambu road`. Google indexed the space form
+  (confirmed in GSC) — the sitemap was the discovery path. Added
+  `suburb_slug` / `suburb_from_slug` in `routes.py` (+ Jinja filter);
+  segment routes resolve either form and 301 non-canonical URLs to the
+  hyphen form before any DB call, so legacy indexed URLs keep their
+  equity. TTL-cached slug→suburb fallback covers punctuated names that a
+  plain space-swap can't reverse.
+
 ## Bugs
 
-- **Broken multi-word "nearby suburbs" link** — the segment-link builder
-  doesn't slugify spaces, so it renders `/apartments-for-rent/spring valley`
-  (space, broken URL) instead of `spring-valley`. Fix: slugify space→hyphen
-  in the nearby-suburbs link generation in `segments.py`.
+- **HEAD requests return 405** — FastAPI's `APIRoute` doesn't auto-add
+  HEAD to `@router.get` routes the way plain Starlette does, so every
+  page 405s on HEAD. Googlebot uses GET so this isn't an SEO issue, but
+  uptime monitors and link-checkers will read the site as down. Fix:
+  `methods=["GET", "HEAD"]` on the consumer route decorators.
 
 ## Search & filters
 
