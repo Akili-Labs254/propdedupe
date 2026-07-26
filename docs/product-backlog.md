@@ -4,10 +4,25 @@ Ideas parked deliberately during Phase 1 launch (July 2026). Nothing
 here blocks the validation gate; revisit after traffic data exists.
 Rough order within each section = leverage per unit of effort.
 
+## Done
+
+- **Bedroom/bathroom ranges on merged properties** (shipped July 2026) —
+  `beds_min/max`, `baths_min/max` on properties; cards + detail show
+  "4–5 bed" when sources disagree, with a DSQ explainer. Display only;
+  search still filters on the primary count. Mirrors price_min/max.
+
+## Bugs
+
+- **Broken multi-word "nearby suburbs" link** — the segment-link builder
+  doesn't slugify spaces, so it renders `/apartments-for-rent/spring valley`
+  (space, broken URL) instead of `spring-valley`. Fix: slugify space→hyphen
+  in the nearby-suburbs link generation in `segments.py`.
+
 ## Search & filters
 
 - **Baths filter + baths on cards** — data already exists (`baths`
   numeric, half-baths handled). Small: one query param + form control.
+  (Baths now also display as a range on cards; this is the filter half.)
 - **Amenity keywords (garden, pool, DSQ, borehole, furnished, gym,
   backup power…)** — agents rarely fill P24's structured fields but DO
   write amenities into descriptions. Extract keyword flags at scrape /
@@ -17,13 +32,6 @@ Rough order within each section = leverage per unit of effort.
   value — nobody else surfaces this reliably.
 - **Rent price presets** ("under 30k / 30–60k / 60–100k") — renters
   think in bands, not free-text mins.
-- **Bedroom ranges on merged properties** — sources often disagree on
-  bed count for the same house (DSQ counted or not: "4 bed" vs "5
-  bed"). Mirror the price_min/max pattern: beds_min/beds_max columns,
-  cards show "4–5 bed" on disagreement, detail page explains. Display
-  only — search keeps filtering on the primary count (same as price).
-  Data mostly arises from manual merges (the beds gate blocks
-  auto-merging differing counts by design).
 
 ## Similarity & discovery
 
