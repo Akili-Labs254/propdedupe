@@ -640,8 +640,21 @@ def main():
         for s in scored
     }
     for (a, b), d in decisions.items():
-        if d == "merge" and (a, b) not in candidate_keys:
-            uf.union(a, b)
+        if d != "merge" or (a, b) in candidate_keys:
+            continue
+        # category is a HARD partition (standing rule) and blocking never
+        # produces a cross-category candidate — but this branch unions
+        # NON-candidates, so a single bad click in the review UI could
+        # otherwise weld a rental onto a for-sale property permanently
+        # (decisions are durable and reapplied every rebuild). Refuse it.
+        cat_a = (details.get(a) or {}).get("category")
+        cat_b = (details.get(b) or {}).get("category")
+        if cat_a and cat_b and cat_a != cat_b:
+            print(f"  WARNING: skipping cross-category merge decision "
+                  f"{a} ({cat_a}) + {b} ({cat_b}) — category is a hard "
+                  "partition; delete this review_decisions row")
+            continue
+        uf.union(a, b)
 
     groups = uf.groups()
     print(f"\n{len(groups)} property groups from {len(auto_merge_pairs)} auto-merge pairs")
