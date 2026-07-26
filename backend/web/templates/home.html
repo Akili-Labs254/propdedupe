@@ -53,7 +53,7 @@
   <h2>Browse by suburb</h2>
   <nav>
     {% for s in top_suburbs %}
-    <a href="/{{ suburb_prefix }}/{{ s.suburb }}">{{ s.suburb | title }}
+    <a href="/{{ suburb_prefix }}/{{ s.suburb | suburb_slug }}">{{ s.suburb | title }}
       ({{ s.property_count }})</a>
     {% endfor %}
     <a href="/{{ suburb_prefix }}">All suburbs →</a>

@@ -161,6 +161,77 @@ def test_segment_page(client, monkeypatch):
     assert "Lavington" in r.text               # adjacency link mesh
 
 
+def test_suburb_slug_roundtrip():
+    """Multi-word suburbs must survive DB value → URL → DB value."""
+    for name in ("kilimani", "ngong road", "spring valley", "south b",
+                 "general mathenge drive", "nairobi cbd"):
+        assert " " not in web_routes.suburb_slug(name)
+        assert web_routes.suburb_from_slug(web_routes.suburb_slug(name)) == name
+
+
+def test_suburb_from_slug_accepts_legacy_and_case():
+    assert web_routes.suburb_from_slug("ngong road") == "ngong road"
+    assert web_routes.suburb_from_slug("Ngong-Road") == "ngong road"
+
+
+def test_multiword_segment_links_have_no_spaces(client, monkeypatch):
+    """Regression: link builders dropped the raw suburb value into the
+    path, producing '/houses-for-sale/ngong road' — which Google indexed."""
+    stats = dict(STATS, suburb="ngong road")
+    use_db(monkeypatch, {
+        "suburb_stats": [FakeResult([stats]),
+                         FakeResult([{"bedrooms": 3, "property_count": 11}]),
+                         FakeResult([{"suburb": "spring valley",
+                                      "property_count": 30}])],
+        "properties": [FakeResult([PROP], count=42)],
+    })
+    r = client.get("/houses-for-sale/ngong-road")
+    assert r.status_code == 200
+    assert "/houses-for-sale/ngong-road/3-bedroom" in r.text   # bed links
+    assert "/houses-for-sale/spring-valley" in r.text          # neighbours
+    assert "houses-for-sale/ngong road" not in r.text          # canonical
+    assert "%20" not in r.text
+
+
+def test_space_form_301s_to_slug(client, monkeypatch):
+    """The URLs already in Search Console must redirect, not 404."""
+    use_db(monkeypatch, {})
+    r = client.get("/houses-for-sale/kiambu road", follow_redirects=False)
+    assert r.status_code == 301
+    assert r.headers["location"] == "/houses-for-sale/kiambu-road"
+
+    r = client.get("/apartments-for-rent/spring valley/2-bedroom?page=3",
+                   follow_redirects=False)
+    assert r.status_code == 301
+    assert r.headers["location"] == \
+        "/apartments-for-rent/spring-valley/2-bedroom?page=3"
+
+
+def test_mixed_case_301s_to_slug(client, monkeypatch):
+    use_db(monkeypatch, {})
+    r = client.get("/houses-for-sale/Karen", follow_redirects=False)
+    assert r.status_code == 301
+    assert r.headers["location"] == "/houses-for-sale/karen"
+
+
+def test_punctuated_suburb_resolves_via_cache(client, monkeypatch):
+    """A suburb whose slug isn't a plain space-swap ('st.mary road')
+    falls back to the cached slug→suburb map instead of 404ing."""
+    web_segments._SLUG_CACHE.clear()
+    stats = dict(STATS, suburb="st.mary road")
+    use_db(monkeypatch, {
+        "suburb_stats": [FakeResult([]),                       # direct miss
+                         FakeResult([{"suburb": "st.mary road"}]),  # map
+                         FakeResult([stats]),                  # retry hit
+                         FakeResult([]),                       # bed links
+                         FakeResult([])],                      # neighbours
+        "properties": [FakeResult([PROP], count=42)],
+    })
+    r = client.get("/houses-for-sale/st-mary-road")
+    assert r.status_code == 200
+    web_segments._SLUG_CACHE.clear()
+
+
 def test_segment_below_threshold_404(client, monkeypatch):
     use_db(monkeypatch, {
         "suburb_stats": [FakeResult([dict(STATS, property_count=3)])]})
@@ -178,8 +249,8 @@ def test_bad_beds_segment_404(client, monkeypatch):
 def test_sitemap(client, monkeypatch):
     use_db(monkeypatch, {
         # sale: totals + beds rows; rent: no totals → category skipped
-        "suburb_stats": [FakeResult([STATS]),
-                         FakeResult([{"suburb": "kilimani", "bedrooms": 3}]),
+        "suburb_stats": [FakeResult([STATS, {"suburb": "ngong road"}]),
+                         FakeResult([{"suburb": "ngong road", "bedrooms": 3}]),
                          FakeResult([])],
         "properties": [FakeResult([{"slug": "abc-123"}])],
     })
@@ -187,8 +258,11 @@ def test_sitemap(client, monkeypatch):
     assert r.status_code == 200
     assert "<loc>" in r.text
     assert "/houses-for-sale/kilimani</loc>" in r.text
-    assert "/houses-for-sale/kilimani/3-bedroom</loc>" in r.text
     assert "/property/abc-123</loc>" in r.text
+    # the sitemap is how Google found the space URLs in the first place
+    assert "/houses-for-sale/ngong-road</loc>" in r.text
+    assert "/houses-for-sale/ngong-road/3-bedroom</loc>" in r.text
+    assert "ngong road" not in r.text
 
 
 def test_robots(client, monkeypatch):

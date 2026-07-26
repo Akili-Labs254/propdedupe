@@ -15,14 +15,17 @@ each suburb page links its qualifying neighbours.
 import math
 import os
 import re
+import time
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import PlainTextResponse, Response
+from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 
 from backend.db.client import get_client
 from backend.dedup.adjacency import ADJACENCY
-from backend.web.routes import templates  # shared env + filters
+from backend.web.routes import (  # shared env + filters
+    suburb_from_slug, suburb_slug, templates,
+)
 
 router = APIRouter(include_in_schema=False)
 
@@ -44,6 +47,30 @@ CATEGORIES = {
 
 def display_name(suburb: str) -> str:
     return suburb.title()
+
+
+# Slug → suburb for names a plain hyphen↔space swap can't reverse (a
+# suburb containing punctuation, e.g. "st.mary road" → "st-mary-road").
+# None exist today, but normalize_suburb() can emit them, and the failure
+# mode would be a silent 404. Cached because the list is ~80 rows and only
+# changes on a dedup rebuild (3×/week) — the free-tier box is IO-bound.
+_SLUG_CACHE = {}            # category → (expires_at, {slug: suburb})
+_SLUG_CACHE_TTL = 600       # seconds
+
+
+def suburb_for_slug(db, slug: str, category: str) -> Optional[str]:
+    now = time.monotonic()
+    entry = _SLUG_CACHE.get(category)
+    if not entry or entry[0] < now:
+        rows = (db.table("suburb_stats")
+                .select("suburb")
+                .eq("category", category)
+                .eq("is_suburb_total", True)
+                .gte("property_count", MIN_SEGMENT)
+                .execute())
+        mapping = {suburb_slug(r["suburb"]): r["suburb"] for r in rows.data}
+        entry = _SLUG_CACHE[category] = (now + _SLUG_CACHE_TTL, mapping)
+    return entry[1].get(slug)
 
 
 def suburb_totals(db, category: str) -> List[dict]:
@@ -120,10 +147,28 @@ def _suburbs_index(request: Request, category: str):
 def _segment_page(request: Request, suburb: str, category: str,
                   bedrooms: Optional[int], page: int):
     cfg = CATEGORIES[category]
-    suburb = suburb.lower().strip()
+    raw, suburb = suburb, suburb_from_slug(suburb)
+    slug = suburb_slug(suburb)
+
+    # Canonicalise the URL before touching the DB. Google indexed the old
+    # space form ("/houses-for-sale/kiambu road") and mixed casing; both
+    # 301 to the hyphen form so the crawl equity follows. Cheap: no query.
+    if raw != slug:
+        target = f"/{cfg['prefix']}/{slug}"
+        if bedrooms:
+            target += f"/{bedrooms}-bedroom"
+        if request.url.query:
+            target += f"?{request.url.query}"
+        return RedirectResponse(target, status_code=301)
+
     db = get_client()
 
     stats = segment_stats(db, suburb, category, bedrooms)
+    if stats is None:
+        alt = suburb_for_slug(db, slug, category)
+        if alt and alt != suburb:
+            suburb = alt
+            stats = segment_stats(db, suburb, category, bedrooms)
     if not stats or stats["property_count"] < MIN_SEGMENT:
         raise HTTPException(status_code=404, detail="Not found")
 
@@ -215,7 +260,7 @@ def sitemap():
         prefix = cfg["prefix"]
         urls.append(f"{BASE_URL}/{prefix}")
         for row in totals:
-            urls.append(f"{BASE_URL}/{prefix}/{row['suburb']}")
+            urls.append(f"{BASE_URL}/{prefix}/{suburb_slug(row['suburb'])}")
 
         beds_rows = (db.table("suburb_stats")
                      .select("suburb, bedrooms")
@@ -227,7 +272,8 @@ def sitemap():
         for row in beds_rows.data:
             b = row["bedrooms"]
             if 1 <= b <= 8:
-                urls.append(f"{BASE_URL}/{prefix}/{row['suburb']}/{b}-bedroom")
+                urls.append(f"{BASE_URL}/{prefix}/"
+                            f"{suburb_slug(row['suburb'])}/{b}-bedroom")
 
     offset = 0
     while True:

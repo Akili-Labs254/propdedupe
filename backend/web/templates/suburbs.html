@@ -15,7 +15,7 @@ one entry per real property, however many sites it's advertised on.</p>
 <ul class="suburb-list">
   {% for s in suburbs %}
   <li>
-    <a href="/{{ cfg.prefix }}/{{ s.suburb }}">{{ display_name(s.suburb) }}</a>
+    <a href="/{{ cfg.prefix }}/{{ s.suburb | suburb_slug }}">{{ display_name(s.suburb) }}</a>
     <span class="count">{{ s.property_count }} properties</span>
   </li>
   {% endfor %}

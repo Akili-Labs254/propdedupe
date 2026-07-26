@@ -2,7 +2,8 @@
 {% from "_macros.html" import property_card, pagination %}
 
 {% set page_title = ((bedrooms ~ " Bedroom " ~ cfg.plural) if bedrooms else cfg.plural) ~ " " ~ cfg.action ~ " in " ~ suburb_name %}
-{% set base_path = "/" ~ cfg.prefix ~ "/" ~ suburb ~ ("/" ~ bedrooms ~ "-bedroom" if bedrooms else "") %}
+{% set suburb_path = suburb | suburb_slug %}
+{% set base_path = "/" ~ cfg.prefix ~ "/" ~ suburb_path ~ ("/" ~ bedrooms ~ "-bedroom" if bedrooms else "") %}
 
 {% block title %}{{ page_title }} — {{ stats.property_count }} available | Fikia{% endblock %}
 {% block description %}{{ stats.property_count }} {{ page_title | lower }}{% if stats.min_price %}, from {{ stats.min_price | price }}{% if stats.median_price %} (median {{ stats.median_price | price }}){% endif %}{% endif %}. Deduplicated across every listing site, stale adverts removed.{% endblock %}
@@ -14,7 +15,7 @@
 {% block content %}
 <nav class="crumbs">
   <a href="/{{ cfg.prefix }}">Nairobi suburbs ({{ cfg.action | lower }})</a>
-  {% if bedrooms %} › <a href="/{{ cfg.prefix }}/{{ suburb }}">{{ suburb_name }}</a>{% endif %}
+  {% if bedrooms %} › <a href="/{{ cfg.prefix }}/{{ suburb_path }}">{{ suburb_name }}</a>{% endif %}
 </nav>
 
 <h1>{{ page_title }}</h1>
@@ -31,7 +32,7 @@
 {% if bed_links %}
 <nav class="sub-segments">
   {% for b in bed_links %}
-  <a href="/{{ cfg.prefix }}/{{ suburb }}/{{ b.bedrooms }}-bedroom">
+  <a href="/{{ cfg.prefix }}/{{ suburb_path }}/{{ b.bedrooms }}-bedroom">
     {{ b.bedrooms }} bedroom ({{ b.property_count }})</a>
   {% endfor %}
 </nav>
@@ -50,7 +51,7 @@
   <h2>Nearby suburbs</h2>
   <nav>
     {% for n in neighbours %}
-    <a href="/{{ cfg.prefix }}/{{ n.suburb }}">{{ display_name(n.suburb) }}
+    <a href="/{{ cfg.prefix }}/{{ n.suburb | suburb_slug }}">{{ display_name(n.suburb) }}
       ({{ n.property_count }})</a>
     {% endfor %}
   </nav>

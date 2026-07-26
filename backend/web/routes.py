@@ -7,6 +7,7 @@ facts only, always link out to the source site, never rehost images
 """
 import math
 import os
+import re
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -73,6 +74,34 @@ def format_baths_range(p) -> str:
 
 templates.env.filters["beds_range"] = format_beds_range
 templates.env.filters["baths_range"] = format_baths_range
+
+
+# ── suburb URL slugs ─────────────────────────────────────────────────
+#
+# Suburb values are stored lowercase with spaces ("ngong road"), and the
+# segment URLs were originally built by dropping that value straight into
+# the path — which produced "/houses-for-sale/ngong road". Browsers
+# %20-encode it and it *works*, but Google indexed the space form (seen in
+# Search Console), the canonical tag emitted a raw space, and the URLs are
+# unshareable. Slug is the hyphen form; the resolver accepts both so the
+# already-indexed space URLs still resolve (and get 301'd — see segments).
+
+_SLUG_SEP = re.compile(r"[^a-z0-9]+")
+
+
+def suburb_slug(suburb: str) -> str:
+    """DB suburb value → URL slug. 'ngong road' → 'ngong-road'."""
+    return _SLUG_SEP.sub("-", (suburb or "").lower()).strip("-")
+
+
+def suburb_from_slug(slug: str) -> str:
+    """URL path segment → DB suburb value. Accepts the hyphen form, the
+    legacy space form and any casing: 'Ngong-Road', 'ngong road' →
+    'ngong road'."""
+    return _SLUG_SEP.sub(" ", (slug or "").lower()).strip()
+
+
+templates.env.filters["suburb_slug"] = suburb_slug
 
 
 def _opt_int(value: Optional[str]) -> Optional[int]:
