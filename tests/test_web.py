@@ -79,7 +79,7 @@ PROP = {
     "status": "active",
 }
 STATS = {"suburb": "kilimani", "bedrooms": None, "is_suburb_total": True,
-         "property_count": 42, "min_price": 8000000, "max_price": 120000000,
+         "property_count": 42, "low_price": 8000000, "high_price": 120000000,
          "median_price": 35000000.0}
 
 

@@ -6,7 +6,7 @@
 {% set base_path = "/" ~ cfg.prefix ~ "/" ~ suburb_path ~ ("/" ~ bedrooms ~ "-bedroom" if bedrooms else "") %}
 
 {% block title %}{{ page_title }} — {{ stats.property_count }} available | Fikia{% endblock %}
-{% block description %}{{ stats.property_count }} {{ page_title | lower }}{% if stats.min_price %}, from {{ stats.min_price | price }}{% if stats.median_price %} (median {{ stats.median_price | price }}){% endif %}{% endif %}. Deduplicated across every listing site, stale adverts removed.{% endblock %}
+{% block description %}{{ stats.property_count }} {{ page_title | lower }}{% if stats.median_price %}, median {{ stats.median_price | price }}{% if stats.low_price and stats.high_price %} (most {{ stats.low_price | price }}–{{ stats.high_price | price }}){% endif %}{% endif %}. Deduplicated across every listing site, stale adverts removed.{% endblock %}
 
 {% block head %}
 <link rel="canonical" href="{{ BASE_URL }}{{ base_path }}">
@@ -22,9 +22,11 @@
 <p class="intro">
   {{ "{:,}".format(stats.property_count) }} distinct
   {{ "properties" if stats.property_count != 1 else "property" }}
-  {%- if stats.min_price and stats.max_price %},
-  from {{ stats.min_price | price }} to {{ stats.max_price | price }}
-  {%- if stats.median_price %} (median {{ stats.median_price | price }}){% endif %}
+  {%- if stats.median_price %},
+  median {{ stats.median_price | price }}
+  {%- if stats.low_price and stats.high_price %}, most between
+  {{ stats.low_price | price }} and {{ stats.high_price | price }}
+  {%- endif %}
   {%- endif %}.
   Duplicates across listing sites merged; adverts that disappeared are removed.
 </p>
