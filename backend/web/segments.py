@@ -33,6 +33,27 @@ MIN_SEGMENT = 5     # pages below this many active properties don't exist
 PER_PAGE = 24
 BASE_URL = os.getenv("SITE_BASE_URL", "http://localhost:8000").rstrip("/")
 
+# Sitemap scope. Google rations crawling by site authority, and a new
+# domain with no backlinks gets very little. Submitting everything
+# spends that budget on the wrong pages: at 2026-07-29 Search Console
+# reported 1.13K indexed against 28,249 "Discovered - currently not
+# indexed" — i.e. Google saw the URLs and declined to crawl them.
+#
+# The corpus is ~452 segment pages vs ~28,415 property pages, so 98% of
+# the sitemap was thin, largely portal-duplicative detail pages while the
+# segment pages — the ones carrying unique aggregated data, and the ones
+# actually ranking (position ~61 for "houses for sale in nairobi") — were
+# 2% of it.
+#
+# So the sitemap now carries segments plus only the multi-source
+# properties (~355): those are the pages that demonstrate the whole point
+# of the product, and are the least duplicative of any single source.
+# Single-source property pages stay fully crawlable via internal links
+# from their segment pages — they're just no longer pushed at Google.
+#
+# Revisit once the domain has real backlinks and crawl budget to spend.
+SITEMAP_MULTI_SOURCE_ONLY = True
+
 _BEDS_RE = re.compile(r"^([1-8])-bedroom$")
 
 # URL prefix + copy per category. Adding a category = one entry here
@@ -277,11 +298,13 @@ def sitemap():
 
     offset = 0
     while True:
-        batch = (db.table("properties")
-                 .select("slug")
-                 .eq("status", "active")
-                 .not_.is_("slug", "null")
-                 .order("id")
+        q = (db.table("properties")
+             .select("slug")
+             .eq("status", "active")
+             .not_.is_("slug", "null"))
+        if SITEMAP_MULTI_SOURCE_ONLY:
+            q = q.gt("source_count", 1)
+        batch = (q.order("id")
                  .range(offset, offset + 999)
                  .execute())
         if not batch.data:

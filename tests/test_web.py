@@ -265,6 +265,34 @@ def test_sitemap(client, monkeypatch):
     assert "ngong road" not in r.text
 
 
+def test_sitemap_restricts_properties_to_multi_source(client, monkeypatch):
+    """Crawl budget on a new domain is scarce: the sitemap carries segment
+    pages plus only multi-source properties, not all ~28k detail pages.
+    (GSC 2026-07-29: 1.13K indexed vs 28,249 discovered-not-indexed.)"""
+    assert web_segments.SITEMAP_MULTI_SOURCE_ONLY is True
+
+    captured = {}
+
+    class RecordingQuery(FakeQuery):
+        def gt(self, col, val):
+            captured[col] = val
+            return self
+
+    real_table = FakeClient.table
+
+    use_db(monkeypatch, {
+        "suburb_stats": [FakeResult([STATS]), FakeResult([]), FakeResult([])],
+        "properties": [FakeResult([{"slug": "abc-123"}])],
+    })
+    monkeypatch.setattr(
+        FakeClient, "table",
+        lambda self, name: (RecordingQuery(real_table(self, name)._pop)
+                            if name == "properties" else real_table(self, name)))
+
+    assert client.get("/sitemap.xml").status_code == 200
+    assert captured.get("source_count") == 1   # .gt("source_count", 1)
+
+
 def test_robots(client, monkeypatch):
     use_db(monkeypatch, {})
     r = client.get("/robots.txt")
