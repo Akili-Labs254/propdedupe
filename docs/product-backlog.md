@@ -95,6 +95,41 @@ Rough order within each section = leverage per unit of effort.
   price_history ("listed at 85k in June, now 76k"). Buyer-side
   negotiation gold; pairs with the price-drop badge.
 
+## Trust signals
+
+Market context (Kenyan property discourse, observed Aug 2026): people
+asking for a house-hunting app describe the problem as **trust and
+verification**, not duplication. Duplication is what they experience;
+untrustworthy listings are what they complain about. The dedup corpus
+already answers the second question — an agent who posts one flat 165
+times across five suburbs at two different prices has told you something
+about their reliability. Reframing duplicate data as evidence rather than
+clutter costs nothing and needs no new inputs.
+
+- **Days on market** — from `first_seen`. "Advertised 47 days" is
+  negotiating leverage no portal will ever show, because it works against
+  their paying customers. Needs ~3 months of history to be meaningful
+  (corpus starts 29 June 2026).
+- **Repost count per property** — "this property has been advertised 165
+  times". Straight accountability, already computable from listing
+  membership, and the single most striking number the corpus holds.
+- **Cross-source price discrepancy flag** — where the same property is
+  listed at materially different prices on different sites. The
+  disagreement is itself the warning; ~37 of 115 cross-source rentals
+  showed one when last measured.
+- **Bait-price detection** — members disagreeing wildly on price (the
+  Kilimani 2-bed listed 40× at KSh 8,500 and 38× at KSh 200,000). Flag
+  rather than hide: the point is to show the reader why to distrust it.
+- **Price history on the property page** — blocked until `price_history`
+  is trustworthy; the cross-category scrape bug that corrupted it is
+  fixed, so the clock restarts Aug 2026.
+
+**Explicitly out of scope**: verifying properties exist, vetting agents,
+escrow/deposit handling, land-registry integration. Those need agent
+relationships and legal structure Fikia doesn't have, and pursuing them
+is the supply-side-first trap that leaves aggregators empty. Fikia's
+answer to trust is evidence from data, not verification of reality.
+
 ## Retention
 
 - **Saved searches / alerts** — email or WhatsApp "new 2-beds in
