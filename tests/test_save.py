@@ -9,7 +9,8 @@ Run: pytest tests/test_save.py
 """
 from types import SimpleNamespace
 
-from backend.db.save import compute_cluster_key, sane_price
+import backend.db.save as save_mod
+from backend.db.save import compute_cluster_key, sane_price, save_listings
 
 
 def listing(**kw):
@@ -80,3 +81,72 @@ def test_cluster_key_changes_when_price_nulled():
 
 def test_cluster_key_stable_for_same_input():
     assert compute_cluster_key(listing()) == compute_cluster_key(listing())
+
+
+# ── category is a hard partition at write time ───────────────────────
+
+class FakeTable:
+    def __init__(self, sink):
+        self.sink = sink
+
+    def __getattr__(self, name):
+        def chain(*a, **kw):
+            return self
+        return chain
+
+    def upsert(self, rows, **kw):
+        self.sink.extend(rows)
+        return self
+
+    def execute(self):
+        return SimpleNamespace(data=[])
+
+
+def scrapable(sid, **kw):
+    base = dict(source_listing_id=sid, url=f"http://p24/{sid}", title="t",
+                price=85000.0, location="Westlands", bedrooms=2, baths=2.0,
+                size_sqm=100.0, address=None, raw={}, image_urls=[])
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def run_save(monkeypatch, incoming, stored, category):
+    """Returns the rows that would actually be upserted."""
+    sink = []
+    monkeypatch.setattr(save_mod, "get_client", lambda: SimpleNamespace(
+        table=lambda name: FakeTable(sink)))
+    monkeypatch.setattr(save_mod, "_existing_categories",
+                        lambda db, sid, ids: stored)
+    save_listings(incoming, source_id=2, category=category)
+    return sink
+
+
+def test_category_conflict_is_skipped(monkeypatch):
+    """Regression: the upsert key omits category, so a rent scrape could
+    silently overwrite a sale row's category and price. That's the shape
+    of the price_history corruption found 2026-08."""
+    rows = run_save(monkeypatch,
+                    [scrapable("111"), scrapable("222")],
+                    stored={"111": "sale"},          # 111 already a sale row
+                    category="rent")
+    saved = {r["source_listing_id"] for r in rows}
+    assert saved == {"222"}                          # 111 refused
+
+
+def test_matching_category_still_saves(monkeypatch):
+    rows = run_save(monkeypatch, [scrapable("333")],
+                    stored={"333": "rent"}, category="rent")
+    assert len(rows) == 1
+    assert rows[0]["category"] == "rent"
+
+
+def test_new_listing_saves_regardless(monkeypatch):
+    """No stored row means no conflict — first sighting always saves."""
+    rows = run_save(monkeypatch, [scrapable("444")], stored={}, category="rent")
+    assert len(rows) == 1
+
+
+def test_junk_price_still_nulled_through_save(monkeypatch):
+    rows = run_save(monkeypatch, [scrapable("555", price=2.0)],
+                    stored={}, category="rent")
+    assert rows[0]["price"] is None
