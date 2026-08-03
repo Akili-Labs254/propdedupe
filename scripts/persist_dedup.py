@@ -298,6 +298,15 @@ def _with_retry(make_call, attempts=4):
     next attempt opens a fresh connection, so a plain retry with
     backoff fixes it. make_call must BUILD AND EXECUTE the request
     (a lambda), so each retry issues a fresh request.
+
+    RETRY SAFETY — anything wrapped in this MUST be idempotent. A lost
+    response is not a lost write: the server can commit and then have
+    the connection die before replying, so the retry re-sends a write
+    that already landed. 2026-08 that killed a rebuild 20 minutes in —
+    a properties INSERT was retried and hit the unique index on the row
+    its own first attempt had just created (23505 on slug). Property
+    writes now use upsert(on_conflict="slug") so a replay is a no-op
+    update instead of a crash. Keep it that way for anything new.
     """
     for attempt in range(attempts):
         try:
@@ -359,7 +368,8 @@ def create_singleton_properties(db, alloc: SlugAllocator,
             })
 
         result = _with_retry(
-            lambda: db.table("properties").insert(prop_rows).execute())
+            lambda: db.table("properties")
+            .upsert(prop_rows, on_conflict="slug").execute())
 
         pairs = []
         for listing_row, prop_row in zip(batch.data, result.data):
@@ -696,7 +706,8 @@ def main():
             **beds_baths_range(member_rows),
         }
         result = _with_retry(
-            lambda pd=prop_data: db.table("properties").insert(pd).execute())
+            lambda pd=prop_data: db.table("properties")
+            .upsert(pd, on_conflict="slug").execute())
         property_id = result.data[0]["id"]
 
         # Queue member listings for bulk linking
@@ -793,7 +804,8 @@ def main():
                 **beds_baths_range(members),
             }
             result = _with_retry(
-                lambda pd=prop_data: db.table("properties").insert(pd).execute())
+                lambda pd=prop_data: db.table("properties")
+                .upsert(pd, on_conflict="slug").execute())
             pid = result.data[0]["id"]
             step2_created += 1
 
