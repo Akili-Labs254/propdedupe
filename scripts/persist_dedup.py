@@ -617,6 +617,14 @@ def main():
 
             for ga in groups_a:
                 for gb in groups_b:
+                    # Identical-image candidates arrive as (ids, ids), so
+                    # both sides hold the same groups and the diagonal is
+                    # a listing against itself. The cluster_key check
+                    # below misses it when cluster_key is falsy, which
+                    # produces listing_a_id == listing_b_id and trips the
+                    # matches_pair_order constraint.
+                    if ga[0] == gb[0]:
+                        continue
                     ra, rb = details.get(ga[0]), details.get(gb[0])
                     if not ra or not rb:
                         continue
