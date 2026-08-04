@@ -41,9 +41,17 @@ def find_intra_matches(
     for triple, ids in hash_map.items():
         ints = tuple(int(h, 16) for h in triple)
         items.append((ints, ids))
-        # Identical image content under different listing rows
+        # Identical image content under different listing rows. Emit the
+        # WHOLE group against itself rather than ids[0] vs the rest: the
+        # caller expands both sides by cluster_key and skips the diagonal,
+        # so every price/bath variant of the same photo gets scored. The
+        # old rep-vs-rest form let one representative comparison decide
+        # the fate of every listing sharing the image — if ids[0] and
+        # ids[1] happened to share a cluster_key the entire group was
+        # discarded, which is why "same photo, agent nudged the price"
+        # never merged.
         if len(ids) > 1:
-            candidates.append((0, [ids[0]], ids[1:]))
+            candidates.append((0, ids, ids))
 
     total = len(items)
     for i in range(total):

@@ -114,6 +114,33 @@ def pick_primary(listing_ids: List[int], details: Dict[int, dict]) -> dict:
     return candidates[0]
 
 
+# Distinct cluster_keys one image may span before we treat it as a stock
+# or agency placeholder rather than one flat listed at a few prices. Also
+# caps the k_a x k_b pair expansion in intra-source scoring.
+CK_GROUP_CAP = 15
+
+
+def _group_by_cluster_key(ids: List[int], details: Dict[int, dict]
+                          ) -> List[List[int]]:
+    """Split listing ids into groups that are identical on cluster_key.
+
+    Listings sharing a cluster_key match on image_url + beds + baths +
+    size + price, so any member represents the group — which is what lets
+    us score one pair per variant instead of one pair per listing.
+
+    Rows with a falsy cluster_key each become their own group: we know
+    nothing about them, so we must not silently lump them together.
+    """
+    groups: Dict[str, List[int]] = {}
+    for i in ids:
+        row = details.get(i)
+        if not row:
+            continue
+        ck = row.get("cluster_key") or f"__nokey_{i}"
+        groups.setdefault(ck, []).append(i)
+    return list(groups.values())
+
+
 CLEAR_CHUNK = 1000  # rows per clear request — small enough that even on a
                     # throttled free-tier box each request finishes well
                     # under Supabase's ~60s API-gateway upstream timeout.
@@ -553,6 +580,7 @@ def main():
 
     intra_rows = []
     intra_tiers = {}
+    intra_skipped_wide = 0   # candidates dropped by CK_GROUP_CAP
     intra_auto_groups = []   # [(ids_a, ids_b)] to union into properties
     intra_jobs = []
     for cat, (bh, ph) in hashes_by_cat.items():
@@ -564,64 +592,88 @@ def main():
         cands = find_intra_matches(hashes)
         print(f"  {name}: {len(cands)} raw candidate pairs")
 
+        # Every id, not just representatives: cluster_key comes from
+        # details and we group both sides by it below.
         need = set()
         for _, ids_a, ids_b in cands:
-            need.add(ids_a[0])
-            need.add(ids_b[0])
+            need.update(ids_a)
+            need.update(ids_b)
         missing = [i for i in need if i not in details]
         if missing:
             details.update(fetch_listing_details(db, missing))
 
+        seen_keys = set()
         for dist, ids_a, ids_b in cands:
-            ra, rb = details.get(ids_a[0]), details.get(ids_b[0])
-            if not ra or not rb:
+            groups_a = _group_by_cluster_key(ids_a, details)
+            groups_b = _group_by_cluster_key(ids_b, details)
+
+            # One image spanning many distinct cluster_keys is a stock or
+            # agency placeholder, not one flat advertised at a few prices.
+            # Skipping caps the k_a x k_b expansion AND stops a shared logo
+            # welding unrelated properties together.
+            if len(groups_a) > CK_GROUP_CAP or len(groups_b) > CK_GROUP_CAP:
+                intra_skipped_wide += 1
                 continue
-            # Same cluster_key → step 2 already collapses this pair
-            if ra.get("cluster_key") and \
-                    ra.get("cluster_key") == rb.get("cluster_key"):
-                continue
 
-            total, tier, signals = score_pair(
-                phash_distance=dist,
-                price_a=float(ra["price"]) if ra.get("price") else None,
-                price_b=float(rb["price"]) if rb.get("price") else None,
-                beds_a=ra.get("bedrooms"),
-                beds_b=rb.get("bedrooms"),
-                baths_a=float(ra["baths"]) if ra.get("baths") else None,
-                baths_b=float(rb["baths"]) if rb.get("baths") else None,
-                location_a=ra.get("location"),
-                location_b=rb.get("location"),
-            )
+            for ga in groups_a:
+                for gb in groups_b:
+                    ra, rb = details.get(ga[0]), details.get(gb[0])
+                    if not ra or not rb:
+                        continue
+                    # Same cluster_key → step 2 already collapses this pair
+                    if ra.get("cluster_key") and \
+                            ra.get("cluster_key") == rb.get("cluster_key"):
+                        continue
 
-            key = (min(ids_a[0], ids_b[0]), max(ids_a[0], ids_b[0]))
-            if key in decisions:
-                tier = "merged" if decisions[key] == "merge" else "dismissed"
-            elif tier == "auto-merge" and total > INTRA_AUTO_CUT:
-                tier = "review"  # measured precision drops above the cut
+                    key = (min(ga[0], gb[0]), max(ga[0], gb[0]))
+                    if key in seen_keys:
+                        continue  # (A,B) and (B,A) both reach here
+                    seen_keys.add(key)
 
-            if tier in ("auto-merge", "merged"):
-                intra_auto_groups.append((list(ids_a), list(ids_b)))
+                    total, tier, signals = score_pair(
+                        phash_distance=dist,
+                        price_a=float(ra["price"]) if ra.get("price") else None,
+                        price_b=float(rb["price"]) if rb.get("price") else None,
+                        beds_a=ra.get("bedrooms"),
+                        beds_b=rb.get("bedrooms"),
+                        baths_a=float(ra["baths"]) if ra.get("baths") else None,
+                        baths_b=float(rb["baths"]) if rb.get("baths") else None,
+                        location_a=ra.get("location"),
+                        location_b=rb.get("location"),
+                    )
 
-            intra_tiers[tier] = intra_tiers.get(tier, 0) + 1
-            intra_rows.append({
-                "listing_a_id": key[0],
-                "listing_b_id": key[1],
-                "score": round(total, 4),
-                "tier": tier,
-                "image_score": round(signals["image"], 2),
-                "price_score": round(signals["price"], 2),
-                "beds_score": round(signals["bedrooms"], 2),
-                "baths_score": round(signals["baths"], 2),
-                "location_score": round(signals["location"], 2),
-                "scope": "intra",
-                "category": ra.get("category") or "sale",
-            })
+                    if key in decisions:
+                        tier = ("merged" if decisions[key] == "merge"
+                                else "dismissed")
+                    elif tier == "auto-merge" and total > INTRA_AUTO_CUT:
+                        tier = "review"  # precision drops above the cut
+
+                    if tier in ("auto-merge", "merged"):
+                        intra_auto_groups.append((list(ga), list(gb)))
+
+                    intra_tiers[tier] = intra_tiers.get(tier, 0) + 1
+                    intra_rows.append({
+                        "listing_a_id": key[0],
+                        "listing_b_id": key[1],
+                        "score": round(total, 4),
+                        "tier": tier,
+                        "image_score": round(signals["image"], 2),
+                        "price_score": round(signals["price"], 2),
+                        "beds_score": round(signals["bedrooms"], 2),
+                        "baths_score": round(signals["baths"], 2),
+                        "location_score": round(signals["location"], 2),
+                        "scope": "intra",
+                        "category": ra.get("category") or "sale",
+                    })
 
     for i in range(0, len(intra_rows), 50):
         chunk = intra_rows[i:i + 50]
         _with_retry(lambda c=chunk: db.table("matches").insert(c).execute())
     print(f"  Inserted {len(intra_rows)} intra-source match rows. "
           f"Tiers: {intra_tiers}")
+    if intra_skipped_wide:
+        print(f"  {intra_skipped_wide} candidate(s) skipped — image spans "
+              f">{CK_GROUP_CAP} cluster_keys (likely a stock/agency image)")
 
     # ── Step 1b: Group auto-merge pairs into properties ──────────
     uf = UnionFind()
