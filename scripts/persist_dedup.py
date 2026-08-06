@@ -248,6 +248,64 @@ def persist_slug_snapshot(db, snapshot: Dict[int, str]):
                     db.table("slug_snapshot").insert(c).execute())
 
 
+# A rebuild that dies partway leaves a partial properties table. Re-running
+# then snapshots THAT — and the old code overwrote the good crash-safe copy
+# with the degraded one, because it only fell back when the live snapshot was
+# completely empty. 2026-08-03 that churned 26,346 public URLs.
+#
+# So: if live slug state is far below what's already stored, this is a partial
+# state, not a shrinking corpus. Keep the stored copy and don't overwrite it.
+#
+# WHY 0.7 AND NOT 0.5 (the stale guard's number): the snapshot is keyed to
+# LISTINGS, and the crash collapsed properties 28,000 -> 6,412 (ratio 0.23)
+# while listings-with-a-slug only fell to 27,968 (ratio 0.513), because each
+# surviving cluster property still carries many members. A 0.5 threshold sits
+# just under the real incident and would not have caught it. Measured, not
+# guessed — see tests/test_persist.py.
+#
+# Erring toward refusing is cheap: a stale snapshot merely remembers slugs for
+# listings that may not exist, which SlugAllocator ignores. Erring toward
+# overwriting loses public URLs permanently. A legitimate one-run shrink of
+# >30% would need a whole source to die, and the stale guard would fire first.
+SNAPSHOT_SHRINK_GUARD = 0.7
+
+
+def stored_snapshot_size(db) -> int:
+    """Row count of the crash-safe copy — one request, not a full read."""
+    res = (db.table("slug_snapshot").select("listing_id", count="exact")
+           .limit(1).execute())
+    return res.count or 0
+
+
+def resolve_slug_snapshot(live: Dict[int, str], stored_count: int,
+                          load_stored):
+    """Decide which slug map to use and whether to persist it.
+
+    Returns (snapshot, should_persist, note). `load_stored` is a callable
+    so the decision is testable without a database.
+    """
+    if not live:
+        # Nothing live at all — the pre-existing recovery path.
+        stored = load_stored() if stored_count else {}
+        if stored:
+            return stored, False, f"{len(stored)} slugs RECOVERED from crash-safe copy"
+        return {}, False, ("0 slugs found (first run, or crash lost the "
+                           "snapshot — slugs will regenerate deterministically)")
+
+    if stored_count and len(live) < stored_count * SNAPSHOT_SHRINK_GUARD:
+        stored = load_stored()
+        if stored:
+            merged = dict(stored)
+            merged.update(live)   # live wins where both know a listing
+            return merged, False, (
+                f"WARNING: live slug state ({len(live)}) is far below the "
+                f"stored snapshot ({stored_count}) — treating this as a "
+                f"partial/post-crash state. Using {len(merged)} slugs "
+                "(stored + live) and NOT overwriting the stored copy.")
+
+    return live, True, f"{len(live)} listings carry a slug"
+
+
 def load_slug_snapshot_fallback(db) -> Dict[int, str]:
     """Recover the last crash-safe snapshot (rerun-after-crash path)."""
     out = {}
@@ -419,26 +477,29 @@ def main():
     # Snapshot slug state BEFORE clearing — rebuilt properties inherit
     # the slugs their member listings carried (stable public URLs).
     print("Snapshotting slug state...")
-    snapshot = snapshot_slug_state(db)
-    if snapshot:
+    live = snapshot_slug_state(db)
+    try:
+        stored_count = stored_snapshot_size(db)
+    except Exception:
+        stored_count = 0   # table missing → behave as if first run
+
+    def _load_stored():
+        try:
+            return load_slug_snapshot_fallback(db)
+        except Exception:
+            return {}
+
+    snapshot, should_persist, note = resolve_slug_snapshot(
+        live, stored_count, _load_stored)
+    print(f"  {note}")
+
+    if should_persist:
         try:
             persist_slug_snapshot(db, snapshot)
-            print(f"  {len(snapshot)} listings carry a slug "
-                  "(crash-safe copy saved)")
+            print("  crash-safe copy saved")
         except Exception as e:
-            print(f"  {len(snapshot)} listings carry a slug "
-                  f"(crash-safe copy FAILED: {e} — run "
-                  "backend/db/slug_snapshot.sql)")
-    else:
-        try:
-            snapshot = load_slug_snapshot_fallback(db)
-        except Exception:
-            snapshot = {}
-        if snapshot:
-            print(f"  {len(snapshot)} slugs RECOVERED from crash-safe copy")
-        else:
-            print("  0 slugs found (first run, or crash lost the snapshot "
-                  "— slugs will regenerate deterministically)")
+            print(f"  crash-safe copy FAILED: {e} — run "
+                  "backend/db/slug_snapshot.sql")
     alloc = SlugAllocator(snapshot)
     prop_members: Dict[int, List[int]] = {}  # new property_id → member ids
 

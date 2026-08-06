@@ -34,6 +34,28 @@ def sane_price(price: Optional[float], category: str) -> Optional[float]:
     return float(price)
 
 
+# Floor area bounds, m². Same treatment as price: a parse error is not a
+# very small flat. Set from the observed tails across 18,081 active
+# listings carrying a size:
+#   <10     418 rows, smallest 1 m². Not a dwelling.
+#   20-25   189 rows — a real Nairobi bedsitter, so the floor sits below.
+#   500-1k  796 rows — real, a large Karen or Runda house.
+#   >2000   175 rows, largest 542,331 m² (54 hectares). Plot sizes and
+#           typos, not floor area.
+# Unlike price this needs no per-category split — a house is a house.
+SIZE_BOUNDS = (10.0, 2000.0)
+
+
+def sane_size(size_sqm: Optional[float]) -> Optional[float]:
+    """Implausible floor areas become NULL. Returns None for None."""
+    if size_sqm is None:
+        return None
+    lo, hi = SIZE_BOUNDS
+    if size_sqm < lo or size_sqm > hi:
+        return None
+    return float(size_sqm)
+
+
 def compute_cluster_key(listing) -> str:
     parts = [
         listing.image_urls[0] if listing.image_urls else "",
@@ -91,10 +113,11 @@ def save_listings(listings: list, source_id: int, category: str = "sale") -> Non
         if prior and prior != category:
             conflicts.append((sid, prior))
             continue
-        # Sanitise BEFORE compute_cluster_key: the key hashes the price,
-        # so it must hash the value we actually store, or the key stops
-        # describing the row it belongs to.
+        # Sanitise BEFORE compute_cluster_key: the key hashes price AND
+        # size, so it must hash the values we actually store, or the key
+        # stops describing the row it belongs to.
         listing.price = sane_price(listing.price, category)
+        listing.size_sqm = sane_size(listing.size_sqm)
         rows.append({
             "source_id": source_id,
             "category": category,

@@ -10,7 +10,8 @@ Run: pytest tests/test_save.py
 from types import SimpleNamespace
 
 import backend.db.save as save_mod
-from backend.db.save import compute_cluster_key, sane_price, save_listings
+from backend.db.save import (compute_cluster_key, sane_price, sane_size,
+                             save_listings)
 
 
 def listing(**kw):
@@ -67,6 +68,47 @@ def test_cheap_but_possible_sale_survives():
 def test_unknown_category_is_permissive():
     """Never silently drop data for a category we haven't bounded."""
     assert sane_price(1.0, "commercial") == 1.0
+
+
+# ── floor area ───────────────────────────────────────────────────────
+
+def test_plausible_sizes_pass_through():
+    assert sane_size(45.0) == 45.0
+    assert sane_size(180.0) == 180.0
+    assert sane_size(800.0) == 800.0      # large Karen/Runda house
+
+
+def test_size_none_stays_none():
+    assert sane_size(None) is None
+
+
+def test_size_boundaries_inclusive():
+    assert sane_size(10.0) == 10.0
+    assert sane_size(2000.0) == 2000.0
+
+
+def test_junk_sizes_nulled():
+    assert sane_size(1.0) is None          # seen live
+    assert sane_size(0.0) is None
+    assert sane_size(542331.0) is None     # 54 hectares, seen live
+    assert sane_size(2500.0) is None
+
+
+def test_small_bedsitter_survives():
+    """20-25 m² is 189 real listings — the floor deliberately sits below."""
+    assert sane_size(22.0) == 22.0
+
+
+def test_junk_size_nulled_through_save(monkeypatch):
+    rows = run_save(monkeypatch, [scrapable("666", size_sqm=1.0)],
+                    stored={}, category="rent")
+    assert rows[0]["size_sqm"] is None
+
+
+def test_cluster_key_changes_when_size_nulled():
+    """size is hashed into cluster_key, so sanitising must happen first."""
+    assert (compute_cluster_key(listing(size_sqm=1.0))
+            != compute_cluster_key(listing(size_sqm=None)))
 
 
 # ── cluster_key must hash the value we store ─────────────────────────
