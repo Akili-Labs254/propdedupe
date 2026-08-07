@@ -87,8 +87,8 @@ def suburb_for_slug(db, slug: str, category: str) -> Optional[str]:
                 .select("suburb")
                 .eq("category", category)
                 .eq("is_suburb_total", True)
-                .gte("property_count", MIN_SEGMENT)
-                .execute())
+                .gte("property_count", 1)   # NOT MIN_SEGMENT — thin suburbs
+                .execute())                 # still serve, see _segment_page
         mapping = {suburb_slug(r["suburb"]): r["suburb"] for r in rows.data}
         entry = _SLUG_CACHE[category] = (now + _SLUG_CACHE_TTL, mapping)
     return entry[1].get(slug)
@@ -190,8 +190,22 @@ def _segment_page(request: Request, suburb: str, category: str,
         if alt and alt != suburb:
             suburb = alt
             stats = segment_stats(db, suburb, category, bedrooms)
-    if not stats or stats["property_count"] < MIN_SEGMENT:
+    if not stats or not stats.get("property_count"):
         raise HTTPException(status_code=404, detail="Not found")
+
+    # Segment pages used to 404 below MIN_SEGMENT. But inventory oscillates
+    # across that line, so a page Google indexed while it had 5 properties
+    # would 404 once it dropped to 4 — and a 404 on an indexed URL is a hard
+    # signal to drop it. 2026-08: our single best search click landed on
+    # /apartments-for-rent/city-park-drive and got a 404; it has 6 properties
+    # again now. 978 segment pages currently sit below the line.
+    #
+    # So the threshold no longer decides whether the page EXISTS, only
+    # whether it's indexable. Thin pages serve (a real page beats a dead end
+    # for anyone arriving from an old SERP) but carry noindex, and are still
+    # excluded from the sitemap, the suburb index and the nearby-suburb links
+    # — so nothing new gets discovered through us.
+    thin = stats["property_count"] < MIN_SEGMENT
 
     result = fetch_properties(db, suburb, category, bedrooms, page)
     total = result.count or 0
@@ -225,6 +239,7 @@ def _segment_page(request: Request, suburb: str, category: str,
         "display_name": display_name,
         "category": category,
         "cfg": cfg,
+        "thin": thin,
     })
 
 

@@ -232,10 +232,53 @@ def test_punctuated_suburb_resolves_via_cache(client, monkeypatch):
     web_segments._SLUG_CACHE.clear()
 
 
-def test_segment_below_threshold_404(client, monkeypatch):
+def test_segment_below_threshold_serves_but_noindex(client, monkeypatch):
+    """Regression: thin pages used to 404. Inventory crosses MIN_SEGMENT
+    constantly, so a page Google indexed at 5 properties 404'd at 4 — and
+    our best search click landed on exactly that (city-park-drive, 2026-08).
+    Now it serves with noindex."""
     use_db(monkeypatch, {
-        "suburb_stats": [FakeResult([dict(STATS, property_count=3)])]})
+        "suburb_stats": [FakeResult([dict(STATS, property_count=3)]),
+                         FakeResult([]),      # bed links
+                         FakeResult([])],     # neighbours
+        "properties": [FakeResult([PROP], count=3)],
+    })
+    r = client.get("/houses-for-sale/kilimani")
+    assert r.status_code == 200
+    assert 'name="robots" content="noindex' in r.text
+
+
+def test_healthy_segment_is_indexable(client, monkeypatch):
+    use_db(monkeypatch, {
+        "suburb_stats": [FakeResult([STATS]), FakeResult([]), FakeResult([])],
+        "properties": [FakeResult([PROP], count=42)],
+    })
+    r = client.get("/houses-for-sale/kilimani")
+    assert r.status_code == 200
+    assert "noindex" not in r.text
+
+
+def test_unknown_suburb_still_404s(client, monkeypatch):
+    """No stats row at all — the suburb doesn't exist. Must still 404,
+    or every typo becomes a soft-200."""
+    web_segments._SLUG_CACHE.clear()
+    use_db(monkeypatch, {
+        "suburb_stats": [FakeResult([]),      # direct miss
+                         FakeResult([])],     # slug→suburb map, empty
+    })
+    assert client.get("/houses-for-sale/atlantis").status_code == 404
+    web_segments._SLUG_CACHE.clear()
+
+
+def test_zero_count_404s(client, monkeypatch):
+    """Defensive: a stats row with property_count 0 is not a page."""
+    web_segments._SLUG_CACHE.clear()
+    use_db(monkeypatch, {
+        "suburb_stats": [FakeResult([dict(STATS, property_count=0)]),
+                         FakeResult([])],
+    })
     assert client.get("/houses-for-sale/kilimani").status_code == 404
+    web_segments._SLUG_CACHE.clear()
 
 
 def test_bad_beds_segment_404(client, monkeypatch):

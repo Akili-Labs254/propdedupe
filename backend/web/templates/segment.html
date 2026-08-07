@@ -10,6 +10,7 @@
 
 {% block head %}
 <link rel="canonical" href="{{ BASE_URL }}{{ base_path }}">
+{% if thin %}<meta name="robots" content="noindex,follow">{% endif %}
 {% endblock %}
 
 {% block content %}
