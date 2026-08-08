@@ -36,6 +36,32 @@
   {% block analytics %}
   <script data-goatcounter="https://fikia.goatcounter.com/count"
           async src="//gc.zgo.at/count.js"></script>
+
+  <!-- Outbound click tracking. The click-through to a source listing is the
+       closest thing to a conversion this site has: it is the moment a
+       visitor actually goes to enquire, and it is what a pay-per-lead model
+       would eventually charge for. Until now it was invisible — we could see
+       people arrive and search, but not whether they found anything.
+
+       The links are target="_blank", so the page never unloads and the async
+       beacon has time to land. Guarded on goatcounter existing because its
+       own script is async and may not have loaded yet.
+
+       Path is per-source (out/property24, out/buyrentkenya). Per-property
+       counts — needed later for "your listing got N enquiries" — would just
+       append the slug, at the cost of thousands of distinct paths. -->
+  <script>
+    document.addEventListener("click", function (e) {
+      var a = e.target.closest && e.target.closest("a.source-link");
+      if (!a) return;
+      if (!window.goatcounter || !window.goatcounter.count) return;
+      window.goatcounter.count({
+        path: "out/" + (a.dataset.source || "unknown"),
+        title: "Outbound to source listing",
+        event: true
+      });
+    });
+  </script>
   {% endblock %}
 </body>
 </html>

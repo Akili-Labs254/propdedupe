@@ -126,6 +126,22 @@ def test_property_page(client, monkeypatch):
     assert "application/ld+json" in r.text
 
 
+def test_outbound_click_is_instrumented(client, monkeypatch):
+    """The click-through to a source listing is the closest thing to a
+    conversion this site has, and it was invisible until 2026-08."""
+    use_db(monkeypatch, {
+        "properties": [FakeResult([PROP])],
+        "listings": [FakeResult([{"source_id": 2, "url": "https://p24/x",
+                                  "title": "t", "price": 85000000,
+                                  "status": "active", "last_seen": "2026"}])],
+    })
+    r = client.get("/property/5-bed-villa-abc123")
+    assert r.status_code == 200
+    assert 'data-source="property24"' in r.text     # link is tagged
+    assert 'a.source-link' in r.text                # listener is present
+    assert '"out/"' in r.text or "out/" in r.text   # event path
+
+
 def test_retired_slug_redirects_301(client, monkeypatch):
     use_db(monkeypatch, {
         "properties": [FakeResult([]),                    # canonical miss
@@ -334,6 +350,51 @@ def test_sitemap_restricts_properties_to_multi_source(client, monkeypatch):
 
     assert client.get("/sitemap.xml").status_code == 200
     assert captured.get("source_count") == 1   # .gt("source_count", 1)
+
+
+# ── vanity CTA redirects ─────────────────────────────────────────────
+
+def test_vanity_redirects_with_ref(client, monkeypatch):
+    """TikTok strips referrers and viewers type the URL, so the path
+    itself has to carry the attribution."""
+    use_db(monkeypatch, {})
+    r = client.get("/50k", follow_redirects=False)
+    assert r.status_code == 302          # 302 not 301 — destination may change
+    assert "ref=tt-50k" in r.headers["location"]
+    assert r.headers["location"].startswith("/?category=rent")
+
+
+def test_vanity_appends_ref_correctly_without_query(client, monkeypatch):
+    """A destination with no existing query string needs '?' not '&'."""
+    use_db(monkeypatch, {})
+    r = client.get("/karen", follow_redirects=False)
+    assert r.headers["location"] == \
+        "/apartments-for-rent/karen/3-bedroom?ref=tt-karen"
+
+
+def test_vanity_is_case_insensitive(client, monkeypatch):
+    """People type what they remember, not what you wrote."""
+    use_db(monkeypatch, {})
+    assert client.get("/50K", follow_redirects=False).status_code == 302
+
+
+def test_unknown_vanity_code_404s(client, monkeypatch):
+    use_db(monkeypatch, {})
+    assert client.get("/nonsense", follow_redirects=False).status_code == 404
+
+
+def test_vanity_does_not_shadow_real_routes(client, monkeypatch):
+    """The catch-all is registered last. If that ever changes, these
+    top-level routes get swallowed and the site breaks silently."""
+    use_db(monkeypatch, {})
+    r = client.get("/robots.txt")
+    assert r.status_code == 200 and "Sitemap:" in r.text
+
+    use_db(monkeypatch, {
+        "suburb_stats": [FakeResult([STATS]), FakeResult([]), FakeResult([])],
+        "properties": [FakeResult([PROP], count=42)],
+    })
+    assert client.get("/houses-for-sale/kilimani").status_code == 200
 
 
 def test_robots(client, monkeypatch):

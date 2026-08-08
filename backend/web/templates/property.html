@@ -68,7 +68,8 @@
     they have the agent's details.</p>
     {% for s in sources %}
     <a class="source-link {{ 'inactive' if not s.active }}" href="{{ s.url }}"
-       rel="nofollow noopener" target="_blank">
+       rel="nofollow noopener" target="_blank"
+       data-source="{{ s.name | lower }}">
       <strong>{{ s.name }}</strong>
       <span>{{ s.price | price }}{% if p.category == "rent" and s.price %} /month{% endif %}</span>
       {% if not s.active %}<span class="stale-note">may no longer be listed</span>{% endif %}
