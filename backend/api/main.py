@@ -36,11 +36,15 @@ app.include_router(stats_router)
 
 from backend.web.segments import router as segments_router
 from backend.web.admin import router as admin_router
+from backend.web.vanity import router as vanity_router
 
 # Consumer HTML pages (/, /property/{slug}) — server-rendered for SEO
 app.include_router(web_router)
 app.include_router(segments_router)
 app.include_router(admin_router)
+# MUST BE LAST: vanity owns "/{code}" and would shadow any single-segment
+# route registered after it (/houses-for-sale, /robots.txt, /sitemap.xml).
+app.include_router(vanity_router)
 app.mount("/static", StaticFiles(directory="backend/web/static"), name="static")
 
 # ── Human error pages for consumer routes ─────────────────────────
