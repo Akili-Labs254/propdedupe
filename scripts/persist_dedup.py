@@ -795,6 +795,8 @@ def main():
     step1_created = 0
 
     step1_pairs = []
+    step1_props = []          # property rows to upsert in batches
+    step1_slug_members = {}   # slug -> [listing_id], to map ids back
     for root_id, member_ids in groups.items():
         primary = pick_primary(member_ids, details)
         if not primary:
@@ -826,17 +828,37 @@ def main():
             **price_range(member_rows),
             **beds_baths_range(member_rows),
         }
-        result = _with_retry(
-            lambda pd=prop_data: db.table("properties")
-            .upsert(pd, on_conflict="slug").execute())
-        property_id = result.data[0]["id"]
+        # Queue the property row rather than writing it now. This loop used
+        # to upsert one row per group — 4,143 sequential round-trips on the
+        # last run. Linking was already batched; the writes weren't.
+        if prop_data["slug"] in step1_slug_members:
+            print(f"  WARNING: duplicate slug {prop_data['slug']!r} across "
+                  "groups — skipping the second. SlugAllocator should "
+                  "prevent this.")
+            continue
+        step1_slug_members[prop_data["slug"]] = list(member_ids)
+        step1_props.append(prop_data)
 
-        # Queue member listings for bulk linking
-        for lid in member_ids:
-            step1_pairs.append({"listing_id": lid, "property_id": property_id})
-        prop_members[property_id] = list(member_ids)
-
-        step1_created += 1
+    # Batch the writes, mapping ids back BY SLUG — upsert with ON CONFLICT
+    # gives no ordering guarantee, and mis-pairing here would attach
+    # listings to the wrong property.
+    for i in range(0, len(step1_props), 100):
+        chunk = step1_props[i:i + 100]
+        result = _with_retry(lambda c=chunk: db.table("properties")
+                             .upsert(c, on_conflict="slug").execute())
+        if len(result.data) != len(chunk):
+            print(f"  WARNING: upserted {len(chunk)} rows but got "
+                  f"{len(result.data)} back — some groups may be unlinked")
+        for row in result.data:
+            member_ids = step1_slug_members.get(row["slug"])
+            if not member_ids:
+                continue
+            step1_pairs.extend({"listing_id": lid, "property_id": row["id"]}
+                               for lid in member_ids)
+            prop_members[row["id"]] = list(member_ids)
+            step1_created += 1
+        print(f"  {min(i + 100, len(step1_props))}/{len(step1_props)} "
+              "group properties written...")
 
     link_batch(db, step1_pairs)
 
@@ -883,62 +905,89 @@ def main():
     step2_linked = 0
     step2_joined = 0  # linked to existing cross-source property
 
+    # This step used to issue TWO sequential requests per cluster — one
+    # property upsert, one listing update — across ~4,500 clusters. That's
+    # ~9,000 round-trips against a throttled free-tier box, and it was most
+    # of a one-hour rebuild (the singleton step, which batches, ran ~790
+    # properties/minute while this crawled). Now: decide everything in
+    # memory, then write in batches.
+
+    pairs = []            # {listing_id, property_id} for the link RPC
+    new_props = []        # property rows to upsert
+    slug_members = {}     # slug -> [listing_id], to map ids back afterwards
+
+    # ── Pass 1: classify every cluster, no I/O ──
     for cluster_key, members in multi_clusters.items():
-        # Check if any member already has a property_id from Step 1
-        existing_pid = None
-        for m in members:
-            if m["property_id"] is not None:
-                existing_pid = m["property_id"]
-                break
+        existing_pid = next(
+            (m["property_id"] for m in members if m["property_id"] is not None),
+            None)
 
         if existing_pid:
-            # Link unlinked members in one call
-            unlinked_ids = [m["id"] for m in members if m["property_id"] is None]
-            if unlinked_ids:
-                _with_retry(lambda ids=unlinked_ids, pid=existing_pid: (
-                    db.table("listings")
-                    .update({"property_id": pid})
-                    .in_("id", ids)
-                    .execute()))
-                step2_linked += len(unlinked_ids)
-                step2_joined += len(unlinked_ids)
+            unlinked_ids = [m["id"] for m in members
+                            if m["property_id"] is None]
+            pairs.extend({"listing_id": lid, "property_id": existing_pid}
+                         for lid in unlinked_ids)
+            step2_linked += len(unlinked_ids)
+            step2_joined += len(unlinked_ids)
             prop_members.setdefault(existing_pid, []).extend(
                 m["id"] for m in members)
-        else:
-            # Create a new property from the first member
-            rep = members[0]
-            prop_data = {
-                "title": rep.get("title"),
-                "price": float(rep["price"]) if rep.get("price") else None,
-                "location": rep.get("location"),
-                "bedrooms": rep.get("bedrooms"),
-                "bathrooms": float(rep["baths"]) if rep.get("baths") else None,
-                "size_sqm": float(rep["size_sqm"]) if rep.get("size_sqm") else None,
-                "image_url": rep.get("image_url"),
-                "source_count": 1,
-                "slug": alloc.slug_for(members),
-                "status": property_status(members),
-                "first_seen": earliest_first_seen(members),
-                "suburb": suburb_of(rep),
-                "category": rep.get("category") or "sale",
-                **price_range(members),
-                **beds_baths_range(members),
-            }
-            result = _with_retry(
-                lambda pd=prop_data: db.table("properties")
-                .upsert(pd, on_conflict="slug").execute())
-            pid = result.data[0]["id"]
-            step2_created += 1
+            continue
 
-            # Link all members in one call
-            member_ids = [m["id"] for m in members]
-            prop_members[pid] = list(member_ids)
-            _with_retry(lambda ids=member_ids, p=pid: (
-                db.table("listings")
-                .update({"property_id": p})
-                .in_("id", ids)
-                .execute()))
-            step2_linked += len(members)
+        rep = members[0]
+        slug = alloc.slug_for(members)
+        if slug in slug_members:
+            # Two clusters claiming one slug would blow up the batched
+            # upsert ("ON CONFLICT DO UPDATE command cannot affect row a
+            # second time") and silently merge two properties if it didn't.
+            # SlugAllocator should make this impossible — shout, don't guess.
+            print(f"  WARNING: duplicate slug {slug!r} across clusters — "
+                  "skipping the second. SlugAllocator should prevent this.")
+            continue
+        slug_members[slug] = [m["id"] for m in members]
+        new_props.append({
+            "title": rep.get("title"),
+            "price": float(rep["price"]) if rep.get("price") else None,
+            "location": rep.get("location"),
+            "bedrooms": rep.get("bedrooms"),
+            "bathrooms": float(rep["baths"]) if rep.get("baths") else None,
+            "size_sqm": float(rep["size_sqm"]) if rep.get("size_sqm") else None,
+            "image_url": rep.get("image_url"),
+            "source_count": 1,
+            "slug": slug,
+            "status": property_status(members),
+            "first_seen": earliest_first_seen(members),
+            "suburb": suburb_of(rep),
+            "category": rep.get("category") or "sale",
+            **price_range(members),
+            **beds_baths_range(members),
+        })
+
+    # ── Pass 2: batch the property writes ──
+    # Map returned ids back BY SLUG, not by position: upsert with ON CONFLICT
+    # gives no ordering guarantee, and a silent mis-pairing here would attach
+    # listings to the wrong property.
+    UPSERT_BATCH = 100
+    for i in range(0, len(new_props), UPSERT_BATCH):
+        chunk = new_props[i:i + UPSERT_BATCH]
+        result = _with_retry(lambda c=chunk: db.table("properties")
+                             .upsert(c, on_conflict="slug").execute())
+        if len(result.data) != len(chunk):
+            print(f"  WARNING: upserted {len(chunk)} rows but got "
+                  f"{len(result.data)} back — some clusters may be unlinked")
+        for row in result.data:
+            member_ids = slug_members.get(row["slug"])
+            if not member_ids:
+                continue
+            prop_members[row["id"]] = list(member_ids)
+            pairs.extend({"listing_id": lid, "property_id": row["id"]}
+                         for lid in member_ids)
+            step2_created += 1
+            step2_linked += len(member_ids)
+        done = min(i + UPSERT_BATCH, len(new_props))
+        print(f"  {done}/{len(new_props)} cluster properties written...")
+
+    # ── Pass 3: one bulk RPC per 500 links ──
+    link_batch(db, pairs)
 
     print(f"  Created {step2_created} new properties")
     print(f"  Linked {step2_linked} listings ({step2_joined} joined existing cross-source properties)")
