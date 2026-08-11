@@ -383,6 +383,24 @@ def test_unknown_vanity_code_404s(client, monkeypatch):
     assert client.get("/nonsense", follow_redirects=False).status_code == 404
 
 
+def test_every_vanity_code_resolves_and_has_a_unique_ref(client, monkeypatch):
+    """A code is added per video, by hand, usually in a hurry the night
+    before posting. Two codes sharing a ref tag would silently merge two
+    videos' traffic in GoatCounter and the mistake would be invisible —
+    the numbers would just be quietly wrong.
+    """
+    from backend.web.vanity import VANITY, destination
+    use_db(monkeypatch, {})
+    refs = [ref for _, ref in VANITY.values()]
+    assert len(refs) == len(set(refs)), f"duplicate ref tag in VANITY: {refs}"
+    for code in VANITY:
+        assert code == code.lower(), f"{code} must be lowercase to be typeable"
+        r = client.get(f"/{code}", follow_redirects=False)
+        assert r.status_code == 302, code
+        assert r.headers["location"] == destination(code)
+        assert "ref=" in r.headers["location"], code
+
+
 def test_vanity_does_not_shadow_real_routes(client, monkeypatch):
     """The catch-all is registered last. If that ever changes, these
     top-level routes get swallowed and the site breaks silently."""

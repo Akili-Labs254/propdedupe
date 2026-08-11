@@ -30,6 +30,7 @@ VANITY = {
     "karen": ("/apartments-for-rent/karen/3-bedroom",            "tt-karen"),
     "dupes": ("/",                                               "tt-dupes"),
     "20m": ("/?category=sale&max_price=20000000", "tt-20m"),
+    "4bed": ("/?category=sale&bedrooms=4",        "tt-4bed"),
 }
 
 
