@@ -5,7 +5,7 @@ drift as the site changes), with a hard cap as a runaway guard.
 
 Run: python -m scripts.scrape_buyrentkenya
 """
-from typing import Optional
+from typing import Optional, Tuple
 
 from backend.scraper.buyrentkenya import BuyRentKenyaScraper
 from backend.db.save import save_listings
@@ -21,13 +21,22 @@ HARD_PAGE_CAP = 600          # runaway guard (rent was ~195 pages July 2026)
 MAX_CONSECUTIVE_EMPTY = 2    # stop after this many empty pages in a row
 
 
-def run(max_pages: Optional[int] = None, category: str = "sale") -> int:
-    """Scrape all pages (or up to max_pages) and return listings saved."""
+def run(max_pages: Optional[int] = None,
+        category: str = "sale") -> Tuple[int, bool]:
+    """Scrape pages and return (listings_saved, complete).
+
+    complete is True only when pagination ended on its own — for BRK that
+    is the 404 streak, since it does not serve empty pages past the end.
+    It is False when the loop ran out of `cap`, because everything past
+    the cap was never looked at, and refresh.stage_stale must not read
+    "not seen this run" as "removed from the site" in that case.
+    """
     base_url = CATEGORY_URLS[category]
     scraper = BuyRentKenyaScraper()
     saved = 0
     empty_streak = 0
     fail_streak = 0
+    complete = False
     cap = min(max_pages, HARD_PAGE_CAP) if max_pages else HARD_PAGE_CAP
 
     for page in range(1, cap + 1):
@@ -44,7 +53,12 @@ def run(max_pages: Optional[int] = None, category: str = "sale") -> int:
             fail_streak += 1
             print(f"  Failed: {e} (fail streak {fail_streak})")
             if fail_streak >= 3:
+                # BRK 404s past the last page, so this is the normal way
+                # a full crawl ends — complete=True. A mid-run block also
+                # lands here; MIN_SCRAPE_RATIO in refresh.stage_stale is
+                # what stops that from mass-staling the source.
                 print(f"[BRK/{category}] {fail_streak} failures in a row — done.")
+                complete = True
                 break
             continue
 
@@ -53,6 +67,7 @@ def run(max_pages: Optional[int] = None, category: str = "sale") -> int:
             print(f"  0 listings (empty streak {empty_streak})")
             if empty_streak >= MAX_CONSECUTIVE_EMPTY:
                 print(f"[BRK] {empty_streak} empty pages in a row — done.")
+                complete = True
                 break
             continue
 
@@ -61,8 +76,9 @@ def run(max_pages: Optional[int] = None, category: str = "sale") -> int:
         saved += len(listings)
         print(f"  Saved {len(listings)} listings ({saved} total)")
 
-    print(f"[BRK/{category}] finished: {saved} listings saved.")
-    return saved
+    how = "reached end of pagination" if complete else f"stopped at cap ({cap})"
+    print(f"[BRK/{category}] finished: {saved} listings saved — {how}.")
+    return saved, complete
 
 
 if __name__ == "__main__":

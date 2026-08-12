@@ -793,6 +793,7 @@ def main():
     # Create property rows and link listings
     print("Creating properties and linking listings...")
     step1_created = 0
+    step1_multi_source = 0    # groups genuinely spanning >1 site
 
     step1_pairs = []
     step1_props = []          # property rows to upsert in batches
@@ -838,6 +839,8 @@ def main():
             continue
         step1_slug_members[prop_data["slug"]] = list(member_ids)
         step1_props.append(prop_data)
+        if len(source_ids) > 1:
+            step1_multi_source += 1
 
     # Batch the writes, mapping ids back BY SLUG — upsert with ON CONFLICT
     # gives no ordering guarantee, and mis-pairing here would attach
@@ -1034,7 +1037,13 @@ def main():
     # ── Summary ──────────────────────────────────────────────────
     print(f"\n=== Done (Steps 1 + 2 + 3) ===")
     print(f"  Matches inserted: {len(match_rows)}")
-    print(f"  Step 1 — Cross-source properties: {step1_created}")
+    # "Cross-source" named the step, not the outcome: most groups the
+    # cross-source stage creates turn out to be single-source after
+    # scoring. Report both, because the honest number is the small one
+    # and it is the one that gets quoted.
+    print(f"  Step 1 — properties created by the cross-source stage: "
+          f"{step1_created}")
+    print(f"           of which actually span >1 site: {step1_multi_source}")
     print(f"  Step 2 — Cluster properties: {step2_created} ({step2_joined} listings joined existing)")
     print(f"  Step 3 — Singleton properties: {step3_created}")
     print(f"  Total properties: {step1_created + step2_created + step3_created}")

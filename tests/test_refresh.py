@@ -1,0 +1,195 @@
+"""Stale detection rules.
+
+refresh.py is the only code that mass-mutates listing status, and until
+now it had no tests. On 2026-08-12 a capped rent scrape marked 7,240 live
+P24 rentals stale or delisted — 41% of everything then flagged as gone —
+because "not seen this run" was read as "removed from the site" when the
+scrape had simply stopped at page 1,500 and never looked further.
+
+Every test here pins a rule that would have prevented that, or a guard
+that already existed and must not regress.
+
+Run: pytest tests/test_refresh.py
+"""
+from datetime import datetime, timezone
+
+import pytest
+
+import scripts.refresh as refresh
+
+
+RUN_START = datetime(2026, 8, 12, 0, 52, tzinfo=timezone.utc)
+
+
+class FakeDB:
+    """Records which (source, category) pairs had statuses flipped."""
+
+    def __init__(self):
+        self.flips = []
+
+
+@pytest.fixture
+def flips(monkeypatch):
+    """Capture _flip_status_chunked calls instead of hitting Supabase."""
+    calls = []
+
+    def fake_flip(db, sid, category, from_status, new_status,
+                  before_field, before_value, chunk=1000):
+        calls.append((sid, category, from_status, new_status))
+        return 0
+
+    monkeypatch.setattr(refresh, "_flip_status_chunked", fake_flip)
+    return calls
+
+
+def result(saved, complete, pre_active, categories=("sale", "rent")):
+    """Build one source's stage_scrape result."""
+    return {
+        "saved": saved * len(categories),
+        "pre_active": pre_active * len(categories),
+        "categories": {c: {"saved": saved, "complete": complete,
+                           "pre_active": pre_active} for c in categories},
+    }
+
+
+def staled(calls, sid, category):
+    return (sid, category, "active", "stale") in calls
+
+
+# ── the 2026-08-12 bug ───────────────────────────────────────────────
+
+def test_capped_scrape_does_not_stale(flips):
+    """THE regression test. A scrape that stopped at its page cap proves
+    nothing about the listings it never reached."""
+    results = {2: result(saved=31500, complete=False, pre_active=21922)}
+    refresh.stage_stale(FakeDB(), RUN_START, results)
+    assert not staled(flips, 2, "rent")
+    assert flips == [], "a capped scrape must not flip any status"
+
+
+def test_capped_rent_does_not_block_completed_sale(flips):
+    """The categories are crawled to different depths, so they cannot
+    share one decision — sale finished and must still be staled."""
+    results = {2: {
+        "saved": 42742, "pre_active": 32723,
+        "categories": {
+            "sale": {"saved": 11242, "complete": True, "pre_active": 10801},
+            "rent": {"saved": 31500, "complete": False, "pre_active": 21922},
+        },
+    }}
+    refresh.stage_stale(FakeDB(), RUN_START, results)
+    assert staled(flips, 2, "sale")
+    assert not staled(flips, 2, "rent")
+
+
+def test_complete_scrape_stales_normally(flips):
+    results = {1: result(saved=5400, complete=True, pre_active=5422)}
+    refresh.stage_stale(FakeDB(), RUN_START, results)
+    assert staled(flips, 1, "sale")
+    assert staled(flips, 1, "rent")
+
+
+# ── guards that already existed and must not regress ─────────────────
+
+def test_unscraped_source_is_skipped(flips):
+    """CI runs BRK only (P24 blocks datacenter IPs). P24 has no
+    'seen this run' signal, so staling would condemn its whole corpus."""
+    results = {1: result(saved=5400, complete=True, pre_active=5422)}
+    refresh.stage_stale(FakeDB(), RUN_START, results)
+    assert not any(sid == 2 for sid, *_ in flips)
+
+
+def test_low_yield_scrape_is_skipped(flips):
+    """A parser that broke mid-run, or a block that looked like the end
+    of pagination. Saved 10% of the prior active count — do not trust it."""
+    results = {2: result(saved=500, complete=True, pre_active=5000)}
+    refresh.stage_stale(FakeDB(), RUN_START, results)
+    assert flips == []
+
+
+def test_crashed_category_is_never_complete(flips):
+    """stage_scrape records complete=False on a crash; a crashed scrape
+    leaves the tail of the list unseen."""
+    results = {2: result(saved=0, complete=False, pre_active=5000)}
+    refresh.stage_stale(FakeDB(), RUN_START, results)
+    assert flips == []
+
+
+# ── --force ──────────────────────────────────────────────────────────
+
+def test_force_overrides_the_cap_guard(flips):
+    results = {2: result(saved=31500, complete=False, pre_active=21922)}
+    refresh.stage_stale(FakeDB(), RUN_START, results, force=True)
+    assert staled(flips, 2, "rent")
+
+
+def test_force_does_not_resurrect_an_unscraped_source(flips):
+    """--force overrides the quality guards, never the existence one:
+    no cutoff makes staling a source you did not scrape correct."""
+    results = {1: result(saved=5400, complete=True, pre_active=5422)}
+    refresh.stage_stale(FakeDB(), RUN_START, results, force=True)
+    assert not any(sid == 2 for sid, *_ in flips)
+
+
+# ── resume mode ──────────────────────────────────────────────────────
+
+def test_resume_mode_stales_everything(flips):
+    """`--stale --stale-cutoff ...` passes no scrape results: the caller
+    supplied a cutoff deliberately and owns the decision."""
+    refresh.stage_stale(FakeDB(), RUN_START, None)
+    for sid in (1, 2):
+        for category in ("sale", "rent"):
+            assert staled(flips, sid, category)
+
+
+# ── ordering ─────────────────────────────────────────────────────────
+
+def test_delist_runs_before_stale(flips):
+    """stale→delisted must precede active→stale, or rows that just went
+    stale in this same pass get delisted immediately."""
+    results = {1: result(saved=5400, complete=True, pre_active=5422)}
+    refresh.stage_stale(FakeDB(), RUN_START, results)
+    sale = [c for c in flips if c[1] == "sale"]
+    assert sale[0][2:] == ("stale", "delisted")
+    assert sale[1][2:] == ("active", "stale")
+
+
+# ── the scrapers' half of the contract ───────────────────────────────
+
+def test_scrapers_report_completeness(monkeypatch):
+    """run() must return (saved, complete) — stage_scrape unpacks two
+    values and a bare int would raise."""
+    from scripts import scrape_property24, scrape_buyrentkenya
+
+    for mod, name in ((scrape_property24, "P24"), (scrape_buyrentkenya, "BRK")):
+        class DeadScraper:
+            def fetch(self, url):
+                raise RuntimeError("404")
+
+            def parse(self, html):
+                return []
+
+        attr = "Property24Scraper" if name == "P24" else "BuyRentKenyaScraper"
+        monkeypatch.setattr(mod, attr, lambda: DeadScraper())
+        saved, complete = mod.run(max_pages=5, category="sale")
+        assert saved == 0
+        assert complete is True, f"{name}: a 404 streak IS the end of the list"
+
+
+def test_hitting_the_cap_reports_incomplete(monkeypatch):
+    """The case that caused the incident: every page returns listings, so
+    the loop exits only because it ran out of cap."""
+    from scripts import scrape_property24 as p24
+
+    class EndlessScraper:
+        def fetch(self, url):
+            return "<html/>"
+
+        def parse(self, html):
+            return ["listing"]
+
+    monkeypatch.setattr(p24, "Property24Scraper", lambda: EndlessScraper())
+    monkeypatch.setattr(p24, "save_listings", lambda *a, **k: None)
+    saved, complete = p24.run(max_pages=3, category="rent")
+    assert saved == 3
+    assert complete is False

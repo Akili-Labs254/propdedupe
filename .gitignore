@@ -16,6 +16,10 @@ env/
 data/*
 !data/.gitkeep
 
+# ── Run logs (long refresh runs are tee'd here) ──
+logs/*
+!logs/.gitkeep
+
 # ── Editor / OS ──
 .vscode/
 .idea/

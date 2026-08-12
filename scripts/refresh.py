@@ -9,11 +9,13 @@ Stages (in --all order):
   2. hashes   Incremental hash backfill — only listings with an image_url
               but no image_phash (i.e. new since last run). NOT the full
               13k-image re-hash that backfill_all_hashes does.
-  3. stale    Flip statuses per source: active listings not seen this run
-              → stale; stale listings not seen for DELIST_DAYS → delisted.
-              GUARDED: skipped for a source whose scrape looks like it
-              failed (saved < MIN_SCRAPE_RATIO of its current active
-              count), so a broken parser can't mass-stale a source.
+  3. stale    Flip statuses per (source, category): active listings not
+              seen this run → stale; stale listings not seen for
+              DELIST_DAYS → delisted. GUARDED three ways — see
+              stage_stale. The important one: a category whose scrape
+              stopped at its page cap is skipped entirely, because
+              "not seen" only means "removed" if we looked at the whole
+              list.
   4. dedup    Full persist pipeline (persist_dedup.main): clears and
               rebuilds matches + properties, links every listing.
 
@@ -40,12 +42,14 @@ MIN_SCRAPE_RATIO = 0.5    # scrape must save >= 50% of source's active count
 
 # ── helpers ──────────────────────────────────────────────────────────
 
-def count_listings(db, source_id=None, status=None) -> int:
+def count_listings(db, source_id=None, status=None, category=None) -> int:
     q = db.table("listings").select("id", count="exact")
     if source_id is not None:
         q = q.eq("source_id", source_id)
     if status is not None:
         q = q.eq("status", status)
+    if category is not None:
+        q = q.eq("category", category)
     return q.limit(1).execute().count or 0
 
 
@@ -92,13 +96,16 @@ def stage_check(db):
 # ── stage: scrape ────────────────────────────────────────────────────
 
 def stage_scrape(db, max_pages=None, rent_max_pages=None, sources="both"):
-    """Run both scrapers. Returns {source_id: (saved, pre_run_active)}.
+    """Run both scrapers.
+
+    Returns {source_id: {"saved": int, "pre_active": int, "categories":
+    {category: {"saved": int, "complete": bool, "pre_active": int}}}}.
 
     rent_max_pages caps ONLY the rent category — free-tier disk can't
-    hold the full P24 rental corpus (~7.5KB/listing, 500MB tier), so we
-    load the first N pages. CAVEAT: on repeat capped runs, rent listings
-    beyond the cap will churn stale/active as the site reorders pages —
-    acceptable while rentals bootstrap, revisit at the tier upgrade.
+    hold the full P24 rental corpus (500MB tier), so we load the first N
+    pages. The per-category "complete" flag is what stops that cap from
+    corrupting stale detection: everything past the cap was never looked
+    at, so its absence proves nothing. See stage_stale.
     """
     from scripts import scrape_buyrentkenya, scrape_property24
 
@@ -119,17 +126,24 @@ def stage_scrape(db, max_pages=None, rent_max_pages=None, sources="both"):
         saved = 0
         per_category = {}
         for category in ("sale", "rent"):
+            cat_pre = count_listings(db, source_id=sid, status="active",
+                                     category=category)
             cap = max_pages
             if category == "rent" and rent_max_pages is not None:
                 cap = min(rent_max_pages, max_pages) if max_pages else rent_max_pages
             try:
-                n = mod.run(max_pages=cap, category=category)
+                n, complete = mod.run(max_pages=cap, category=category)
             except Exception as e:
+                # A crash leaves the tail of the list unseen, so it is
+                # never "complete" — staling on a crashed scrape is how
+                # you lose a source.
                 print(f"!! {name}/{category} scrape crashed: {e}")
-                n = 0
-            per_category[category] = n
+                n, complete = 0, False
+            per_category[category] = {"saved": n, "complete": complete,
+                                      "pre_active": cat_pre}
             saved += n
-        results[sid] = (saved, pre_active, per_category)
+        results[sid] = {"saved": saved, "pre_active": pre_active,
+                        "categories": per_category}
     return results
 
 
@@ -187,18 +201,23 @@ def stage_hashes(db):
 
 # ── stage: stale detection ───────────────────────────────────────────
 
-def _flip_status_chunked(db, sid, from_status, new_status,
+def _flip_status_chunked(db, sid, category, from_status, new_status,
                          before_field, before_value, chunk=1000):
     """Flip listing status in id-batches so no single request exceeds
     Supabase's ~60s API-gateway upstream timeout. A full-table UPDATE
     504s on the free tier — and a windowed P24 rescrape can stale
     thousands of out-of-window rows at once. Returns the count flipped.
+
+    Scoped to one category because sale and rent are crawled to different
+    depths: rent is capped, sale usually is not, so they cannot share a
+    stale decision.
     """
     from scripts.persist_dedup import _with_retry
     total = 0
     while True:
         q = _with_retry(lambda: db.table("listings").select("id")
-                        .eq("source_id", sid).eq("status", from_status)
+                        .eq("source_id", sid).eq("category", category)
+                        .eq("status", from_status)
                         .lt(before_field, before_value)
                         .order("id").limit(chunk).execute())
         ids = [r["id"] for r in q.data]
@@ -213,43 +232,66 @@ def _flip_status_chunked(db, sid, from_status, new_status,
 def stage_stale(db, run_start, scrape_results=None, force=False):
     """Flip active→stale (not seen this run) and stale→delisted (old).
 
-    scrape_results: {source_id: (saved, pre_run_active)} from stage_scrape.
-    If a source's scrape saved < MIN_SCRAPE_RATIO of its previous active
-    count, its stale pass is SKIPPED (unless --force) — a broken parser
-    must not mass-stale a source.
+    Runs per (source, category), because the two categories are crawled
+    to different depths and a decision valid for one is invalid for the
+    other. Three guards, in order:
+
+    1. Source not scraped this run (CI does BRK only — P24 blocks
+       datacenter IPs). No "seen this run" signal at all, so staling
+       would condemn its entire active set.
+    2. Category's scrape did not reach the end of pagination. Under a
+       page cap, "not seen" means "not looked at", not "removed". This
+       guard is the fix for 2026-08-12, when a capped rent scrape staled
+       7,240 live P24 rentals — 41% of everything then marked gone.
+    3. Category saved < MIN_SCRAPE_RATIO of its own prior active count —
+       a broken parser, or a block that happened to look like the end of
+       pagination.
+
+    --force overrides 2 and 3, never 1: there is no cutoff that makes
+    staling an unscraped source correct.
     """
     print("\n=== Stale detection ===")
     cutoff = run_start.isoformat()
     delist_cutoff = (run_start - timedelta(days=DELIST_DAYS)).isoformat()
 
     for sid, name in ((1, "BRK"), (2, "P24")):
-        # A scrape ran but this source wasn't attempted (e.g. CI does BRK
-        # only — P24 blocks datacenter IPs). It has no "seen this run"
-        # signal, so staling it would mark its ENTIRE active set stale.
-        # Skip it. (scrape_results is None only in --stale resume mode,
-        # where the caller passes an explicit cutoff on purpose.)
         if scrape_results is not None and sid not in scrape_results:
             print(f"  {name}: not scraped this run — skipping stale pass.")
             continue
-        if scrape_results and not force:
-            saved, pre_active = scrape_results.get(sid, (0, 0, {}))[:2]
-            if pre_active > 0 and saved < pre_active * MIN_SCRAPE_RATIO:
-                print(f"  {name}: scrape saved {saved} vs {pre_active} active "
-                      f"(< {MIN_SCRAPE_RATIO:.0%}) — SKIPPING stale pass. "
-                      "Check the scraper, or rerun with --force.")
-                continue
 
-        # stale → delisted first (order matters: don't delist rows that
-        # only just went stale in this same pass). Both chunked to stay
-        # under the 60s gateway limit.
-        n_delisted = _flip_status_chunked(
-            db, sid, "stale", "delisted", "last_seen", delist_cutoff)
+        # None in --stale resume mode, where the caller supplied an
+        # explicit cutoff on purpose and takes responsibility for it.
+        categories = (scrape_results or {}).get(sid, {}).get("categories", {})
 
-        # active + not seen this run → stale
-        n_stale = _flip_status_chunked(
-            db, sid, "active", "stale", "last_seen", cutoff)
+        for category in ("sale", "rent"):
+            info = categories.get(category)
+            label = f"{name}/{category}"
 
-        print(f"  {name}: {n_stale} → stale, {n_delisted} → delisted")
+            if info is not None and not force:
+                if not info["complete"]:
+                    print(f"  {label}: scrape stopped at the page cap, not "
+                          f"the end of the list — SKIPPING stale pass "
+                          f"(everything past the cap was never checked).")
+                    continue
+                saved, cat_pre = info["saved"], info["pre_active"]
+                if cat_pre > 0 and saved < cat_pre * MIN_SCRAPE_RATIO:
+                    print(f"  {label}: saved {saved} vs {cat_pre} active "
+                          f"(< {MIN_SCRAPE_RATIO:.0%}) — SKIPPING stale pass. "
+                          "Check the scraper, or rerun with --force.")
+                    continue
+
+            # stale → delisted first (order matters: don't delist rows
+            # that only just went stale in this same pass). Both chunked
+            # to stay under the 60s gateway limit.
+            n_delisted = _flip_status_chunked(
+                db, sid, category, "stale", "delisted",
+                "last_seen", delist_cutoff)
+
+            # active + not seen this run → stale
+            n_stale = _flip_status_chunked(
+                db, sid, category, "active", "stale", "last_seen", cutoff)
+
+            print(f"  {label}: {n_stale} → stale, {n_delisted} → delisted")
 
 
 # ── stage: dedup ─────────────────────────────────────────────────────
@@ -328,11 +370,13 @@ def main():
         if args.stale_cutoff:
             cutoff = datetime.fromisoformat(args.stale_cutoff)
             print(f"Using explicit stale cutoff: {cutoff.isoformat()}")
-        if args.max_pages and not args.force:
-            print("\n--max-pages set: skipping stale pass (partial scrape "
-                  "would mass-stale everything). Use --force to override.")
-        else:
-            stage_stale(db, cutoff, scrape_results, force=args.force)
+        # No blanket --max-pages skip any more. It only ever covered
+        # --max-pages and silently ignored --rent-max-pages, which is
+        # exactly how the 2026-08-12 mass-stale got through. stage_stale
+        # now decides per category from the scraper's own "did I reach
+        # the end" flag, which covers both caps and is strictly more
+        # accurate than inspecting the CLI args.
+        stage_stale(db, cutoff, scrape_results, force=args.force)
 
     if args.all or args.dedup:
         stage_dedup()
@@ -347,10 +391,9 @@ def main():
     if scrape_results:
         names = {1: "BRK", 2: "P24"}
         dead = []
-        for sid, tup in scrape_results.items():
-            per_category = tup[2] if len(tup) > 2 else {}
-            for cat, n in per_category.items():
-                if n == 0:
+        for sid, res in scrape_results.items():
+            for cat, info in res.get("categories", {}).items():
+                if info["saved"] == 0:
                     dead.append(f"{names.get(sid, sid)}/{cat}")
         if dead:
             print(f"FAILURE: no listings saved for {', '.join(dead)} — "

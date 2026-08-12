@@ -140,14 +140,25 @@ def save_listings(listings: list, source_id: int, category: str = "sale") -> Non
             "cluster_key": compute_cluster_key(listing),
         })
     if conflicts:
-        for sid, prior in conflicts[:10]:
-            print(f"  WARNING: skipped listing {sid} — stored category "
-                  f"{prior!r}, this scrape says {category!r}. Category is a "
-                  "hard partition; refusing to overwrite.")
-        if len(conflicts) > 10:
-            print(f"  ... and {len(conflicts) - 10} more category conflicts")
-        print(f"  {len(conflicts)} listing(s) skipped on category conflict — "
-              "if this is more than a handful, the scrape URLs are wrong")
+        # One conflict per page is expected and not a fault: P24 slots a
+        # promoted rental into every sale results page. 651 pages on the
+        # 2026-08-12 run produced exactly 651 conflicts, never two on a
+        # page. Protecting price_history from that is the whole point of
+        # the guard, so say so rather than crying wolf 651 times.
+        if len(conflicts) == 1:
+            sid, prior = conflicts[0]
+            print(f"  1 listing skipped ({sid}: stored {prior!r}, scrape says "
+                  f"{category!r}) — expected, promoted cross-category slot.")
+        else:
+            for sid, prior in conflicts[:10]:
+                print(f"  WARNING: skipped listing {sid} — stored category "
+                      f"{prior!r}, this scrape says {category!r}. Category is "
+                      "a hard partition; refusing to overwrite.")
+            if len(conflicts) > 10:
+                print(f"  ... and {len(conflicts) - 10} more category conflicts")
+            print(f"  WARNING: {len(conflicts)} category conflicts on one page "
+                  "— more than the single promoted slot P24 injects. Check "
+                  "the scrape URLs.")
 
     if rows:
         db.table("listings").upsert(rows, on_conflict="source_id,source_listing_id").execute()
