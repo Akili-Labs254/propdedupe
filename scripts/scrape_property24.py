@@ -11,10 +11,34 @@ from typing import Optional, Tuple
 from backend.scraper.property24 import Property24Scraper
 from backend.db.save import save_listings
 
-# Category → listing index URL. Rent wedge = apartments/flats.
+# Category → the index URLs that make it up. Category is a hard partition
+# in the DB (see save.py); P24 splits inventory by property type, so one
+# category can span several indexes.
+#
+# DELIBERATELY NOT INCLUDED: apartments-flats-for-sale-in-nairobi-p95.
+# Measured 2026-08-12 (scripts/probe_depth.py):
+#
+#   houses-for-sale           10,708 listings    536 pages    45 MB
+#   apartments-flats-for-sale 88,820 listings  4,441 pages   373 MB
+#   apartments-flats-to-rent  84,500 listings  4,225 pages   355 MB
+#
+# Free-tier headroom is ~205 MB, so apartments cannot be crawled to the
+# end. That matters beyond disk: `complete` is an AND across a category's
+# indexes, so adding a permanently-capped index would stop the whole sale
+# category from staling — and sale is the ONE P24 category that currently
+# completes and stales correctly. Adding it would trade working stale
+# detection for a partial slice of inventory.
+#
+# When disk allows, add it with ?SortOrder=PriceAscending so a capped
+# crawl takes the cheapest listings — the sub-20M band we actually want —
+# rather than an arbitrary slice of P24's default ordering.
 CATEGORY_URLS = {
-    "sale": "https://www.property24.co.ke/houses-for-sale-in-nairobi-p95",
-    "rent": "https://www.property24.co.ke/apartments-flats-to-rent-in-nairobi-p95",
+    "sale": [
+        "https://www.property24.co.ke/houses-for-sale-in-nairobi-p95",
+    ],
+    "rent": [
+        "https://www.property24.co.ke/apartments-flats-to-rent-in-nairobi-p95",
+    ],
 }
 SOURCE_ID = 2  # Property24 Kenya — second row inserted into sources
 HARD_PAGE_CAP = 6000         # runaway guard (P24 rent is thousands of pages)
@@ -25,28 +49,13 @@ def log(msg):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
 
 
-def run(max_pages: Optional[int] = None,
-        category: str = "sale") -> Tuple[int, bool]:
-    """Scrape pages and return (listings_saved, complete).
-
-    complete is True only when pagination ended on its own — an empty-page
-    or 404 streak means we reached the real end of the list. It is False
-    when the loop simply ran out of `cap`, because then everything past
-    the cap was never looked at.
-
-    refresh.stage_stale depends on this distinction. "Not seen this run"
-    is only evidence a listing was removed if we actually looked at the
-    whole list; under a cap it just means we stopped early. Reporting
-    complete=True after a capped run staled 7,240 live P24 rentals on
-    2026-08-12 — 41% of everything marked gone.
-    """
-    base_url = CATEGORY_URLS[category]
+def _crawl_index(base_url: str, cap: int, category: str) -> Tuple[int, bool]:
+    """Crawl one index URL to `cap` pages. Returns (saved, complete)."""
     scraper = Property24Scraper()
     saved = 0
     empty_streak = 0
     fail_streak = 0
     complete = False
-    cap = min(max_pages, HARD_PAGE_CAP) if max_pages else HARD_PAGE_CAP
 
     for page in range(1, cap + 1):
         url = base_url if page == 1 else f"{base_url}?Page={page}"
@@ -88,8 +97,40 @@ def run(max_pages: Optional[int] = None,
         print(f"  Saved {len(listings)} listings ({saved} total)")
 
     how = "reached end of pagination" if complete else f"stopped at cap ({cap})"
-    log(f"[P24/{category}] finished: {saved} listings saved — {how}.")
+    log(f"[P24/{category}] {base_url.rsplit('/', 1)[-1]}: "
+        f"{saved} saved — {how}.")
     return saved, complete
+
+
+def run(max_pages: Optional[int] = None,
+        category: str = "sale") -> Tuple[int, bool]:
+    """Scrape every index in `category` and return (listings_saved, complete).
+
+    complete is True only when EVERY index in the category ended
+    pagination on its own — an empty-page or 404 streak means we reached
+    the real end of that list. It is False when any index ran out of
+    `cap`, because then part of the category was never looked at.
+
+    refresh.stage_stale depends on this. "Not seen this run" is only
+    evidence a listing was removed if we actually looked at the whole
+    list; under a cap it just means we stopped early. Reporting
+    complete=True after a capped run staled 7,240 live P24 rentals on
+    2026-08-12 — 41% of everything then marked gone. See ADR 0008.
+
+    `cap` applies PER INDEX, not per category: two sale indexes with
+    max_pages=1500 crawl up to 3,000 pages. Predictable per URL, but
+    watch it when disk is the binding constraint.
+    """
+    cap = min(max_pages, HARD_PAGE_CAP) if max_pages else HARD_PAGE_CAP
+    total = 0
+    complete = True
+    for base_url in CATEGORY_URLS[category]:
+        saved, done = _crawl_index(base_url, cap, category)
+        total += saved
+        complete = complete and done
+    log(f"[P24/{category}] finished: {total} listings saved across "
+        f"{len(CATEGORY_URLS[category])} index(es), complete={complete}.")
+    return total, complete
 
 
 if __name__ == "__main__":

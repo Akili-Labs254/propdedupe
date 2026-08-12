@@ -29,8 +29,11 @@ VANITY = {
     "50k":   ("/?category=rent&min_price=45000&max_price=55000", "tt-50k"),
     "karen": ("/apartments-for-rent/karen/3-bedroom",            "tt-karen"),
     "dupes": ("/",                                               "tt-dupes"),
-    "20m": ("/?category=sale&max_price=20000000", "tt-20m"),
-    "4bed": ("/?category=sale&bedrooms=4",        "tt-4bed"),
+    # Both video CTAs sort cheapest-first. Without it the default
+    # newest-first order opened /4bed on 145M-780M Lavington villas for
+    # viewers who had just watched a video about a 16M house in Syokimau.
+    "20m":  ("/?category=sale&max_price=20000000&sort=price_asc", "tt-20m"),
+    "4bed": ("/?category=sale&bedrooms=4&sort=price_asc",         "tt-4bed"),
 }
 
 

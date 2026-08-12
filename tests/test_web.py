@@ -352,6 +352,95 @@ def test_sitemap_restricts_properties_to_multi_source(client, monkeypatch):
     assert captured.get("source_count") == 1   # .gt("source_count", 1)
 
 
+# ── sorting ──────────────────────────────────────────────────────────
+
+class SortRecorder:
+    """Wraps a FakeQuery, recording .order() and .is_() calls."""
+
+    def __init__(self, inner, log):
+        self._inner, self._log = inner, log
+        self.not_ = self
+
+    def order(self, col, desc=False):
+        self._log.append(("order", col, desc))
+        return self
+
+    def is_(self, col, val):
+        self._log.append(("is_", col, val))
+        return self
+
+    def __getattr__(self, name):
+        return lambda *a, **k: self
+
+    def execute(self):
+        return self._inner.execute()
+
+
+def _sorted_by(client, monkeypatch, query):
+    log = []
+    real_table = FakeClient.table
+    use_db(monkeypatch, {
+        "properties": [FakeResult([PROP], count=1)],
+        "listings": [FakeResult([], count=0), FakeResult([], count=0)],
+        "suburb_stats": [FakeResult([])],
+    })
+    monkeypatch.setattr(
+        FakeClient, "table",
+        lambda self, name: (SortRecorder(real_table(self, name), log)
+                            if name == "properties" else real_table(self, name)))
+    r = client.get(query)
+    assert r.status_code == 200
+    return log
+
+
+def test_default_sort_is_newest(client, monkeypatch):
+    log = _sorted_by(client, monkeypatch, "/")
+    assert ("order", "first_seen", True) in log
+
+
+def test_price_ascending(client, monkeypatch):
+    log = _sorted_by(client, monkeypatch, "/?sort=price_asc")
+    assert ("order", "price", False) in log
+
+
+def test_price_descending(client, monkeypatch):
+    log = _sorted_by(client, monkeypatch, "/?sort=price_desc")
+    assert ("order", "price", True) in log
+
+
+def test_price_sort_excludes_poa(client, monkeypatch):
+    """Sorting by price with price IS NULL rows in the set fills page 1
+    with properties showing no price. Someone who asked to sort by price
+    wants prices."""
+    log = _sorted_by(client, monkeypatch, "/?sort=price_asc")
+    assert ("is_", "price", "null") in log
+
+
+def test_newest_sort_keeps_poa(client, monkeypatch):
+    log = _sorted_by(client, monkeypatch, "/")
+    assert ("is_", "price", "null") not in log
+
+
+def test_unknown_sort_falls_back_rather_than_500(client, monkeypatch):
+    """?sort=; DROP TABLE and friends must not reach the query builder."""
+    log = _sorted_by(client, monkeypatch, "/?sort=nonsense")
+    ordered_cols = [col for kind, col, _ in log if kind == "order"]
+    assert ordered_cols == ["first_seen", "id"], (
+        f"unknown sort must fall back to the default, got {ordered_cols}")
+
+
+def test_sort_survives_pagination(client, monkeypatch):
+    """The pagination links are built in the template; dropping sort
+    there would silently reset the order on page 2."""
+    use_db(monkeypatch, {
+        "properties": [FakeResult([PROP], count=200)],
+        "listings": [FakeResult([], count=0), FakeResult([], count=0)],
+        "suburb_stats": [FakeResult([])],
+    })
+    body = client.get("/?sort=price_asc").text
+    assert "sort=price_asc" in body
+
+
 # ── vanity CTA redirects ─────────────────────────────────────────────
 
 def test_vanity_redirects_with_ref(client, monkeypatch):

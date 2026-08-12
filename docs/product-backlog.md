@@ -138,6 +138,28 @@ answer to trust is evidence from data, not verification of reality.
 - **WhatsApp share button on cards** — one `wa.me` link; shares are
   the primary growth loop.
 
+## Dedup
+
+- **Do development units collapse into one property?** — 96 phash
+  groups hold 4,183 active listings: e.g. 212 properties, all 4-bed,
+  all 13–20M, across Kileleshwa/Kilimani/Lavington. One development's
+  render on individually-listed units. The scorer can't auto-merge them
+  because price varies across the development and drags the total under
+  the cut, so 1,417 pairs sit in the review queue.
+
+  The product question, not a threshold question: is a 64-unit
+  development 64 properties or one listing with a price range? The
+  schema already supports the latter (`price_min`/`price_max`,
+  `beds_min`/`beds_max`), which is a point in its favour. Deciding it
+  either way would collapse a large slice of the review queue and
+  materially change the headline property count — so it needs an ADR,
+  not a patch.
+
+  `hide_generic_images()` was disabled 2026-08-12 because it was
+  blanking these images (11% of active properties) rather than
+  addressing the cause. Genuine stock placeholders are now unhidden;
+  that's the accepted cost until this is decided.
+
 ## Platform & polish
 
 - **Map view** — Leaflet + OSM (decision per vision doc: free tier

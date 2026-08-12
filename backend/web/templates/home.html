@@ -31,11 +31,21 @@
            value="{{ filters.min_price if filters.min_price is not none }}">
     <input type="number" name="max_price" placeholder="Max KSh"
            value="{{ filters.max_price if filters.max_price is not none }}">
+    <select name="sort" aria-label="Sort results">
+      <option value="newest" {% if filters.sort == "newest" %}selected{% endif %}>Newest first</option>
+      <option value="price_asc" {% if filters.sort == "price_asc" %}selected{% endif %}>Price: low to high</option>
+      <option value="price_desc" {% if filters.sort == "price_desc" %}selected{% endif %}>Price: high to low</option>
+    </select>
     <button type="submit">Search</button>
   </form>
 </section>
 
-<p class="result-count">{{ "{:,}".format(total) }} properties</p>
+<p class="result-count">
+  {{ "{:,}".format(total) }} properties
+  {% if filters.sort != "newest" %}
+  <span class="muted">— priced listings only (POA excluded when sorting by price)</span>
+  {% endif %}
+</p>
 
 <section class="grid">
   {% for prop in properties %}
@@ -45,7 +55,7 @@
   {% endfor %}
 </section>
 
-{% set qs = "&category=" ~ filters.category ~ "&location=" ~ filters.location ~ (("&bedrooms=" ~ filters.bedrooms) if filters.bedrooms is not none else "") ~ (("&min_price=" ~ filters.min_price) if filters.min_price is not none else "") ~ (("&max_price=" ~ filters.max_price) if filters.max_price is not none else "") %}
+{% set qs = "&category=" ~ filters.category ~ "&location=" ~ filters.location ~ (("&bedrooms=" ~ filters.bedrooms) if filters.bedrooms is not none else "") ~ (("&min_price=" ~ filters.min_price) if filters.min_price is not none else "") ~ (("&max_price=" ~ filters.max_price) if filters.max_price is not none else "") ~ (("&sort=" ~ filters.sort) if filters.sort != "newest" else "") %}
 {{ pagination(page, total_pages, "/", qs) }}
 
 {% if top_suburbs %}

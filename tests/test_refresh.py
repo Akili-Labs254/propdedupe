@@ -176,6 +176,56 @@ def test_scrapers_report_completeness(monkeypatch):
         assert complete is True, f"{name}: a 404 streak IS the end of the list"
 
 
+def test_multi_index_category_sums_and_ands(monkeypatch):
+    """A category spans several index URLs (houses + apartments). Saved
+    counts add; completeness must AND — one capped index means the
+    category was not fully seen, however well the others went."""
+    from scripts import scrape_property24 as p24
+
+    calls = []
+
+    def fake_crawl(base_url, cap, category):
+        calls.append(base_url)
+        # first index finishes cleanly, second hits the cap
+        return (100, True) if len(calls) == 1 else (50, False)
+
+    monkeypatch.setattr(p24, "_crawl_index", fake_crawl)
+    monkeypatch.setattr(p24, "CATEGORY_URLS", {"sale": ["a", "b"]})
+    saved, complete = p24.run(category="sale")
+    assert saved == 150
+    assert complete is False, "one capped index must sink the whole category"
+    assert calls == ["a", "b"], "every index in the category must be crawled"
+
+
+def test_multi_index_complete_only_when_all_complete(monkeypatch):
+    from scripts import scrape_property24 as p24
+    monkeypatch.setattr(p24, "_crawl_index",
+                        lambda url, cap, cat: (10, True))
+    monkeypatch.setattr(p24, "CATEGORY_URLS", {"sale": ["a", "b", "c"]})
+    saved, complete = p24.run(category="sale")
+    assert (saved, complete) == (30, True)
+
+
+def test_brk_indexes_apartments_for_sale():
+    """Closing half the sub-20M gap: BRK's whole corpus is 49 MB, so
+    every category can still be crawled to completion with this added."""
+    from scripts import scrape_buyrentkenya as brk
+    assert any("flats-apartments-for-sale" in u
+               for u in brk.CATEGORY_URLS["sale"])
+
+
+def test_p24_sale_stays_completable():
+    """P24 sale-houses is 536 pages and completes, so it stales. P24
+    apartments-for-sale is 4,441 pages and never could — and since
+    `complete` ANDs across a category's indexes, adding it would stop
+    the houses staling too. Deliberately excluded until disk allows."""
+    from scripts import scrape_property24 as p24
+    assert p24.CATEGORY_URLS["sale"] == [
+        "https://www.property24.co.ke/houses-for-sale-in-nairobi-p95"
+    ], ("adding an uncrawlable index to P24 sale silently disables stale "
+        "detection for the whole category — see ADR 0008 and probe_depth")
+
+
 def test_hitting_the_cap_reports_incomplete(monkeypatch):
     """The case that caused the incident: every page returns listings, so
     the loop exits only because it ran out of cap."""

@@ -115,6 +115,18 @@ def _opt_int(value: Optional[str]) -> Optional[int]:
         return None
 
 
+# Sort key → (column, descending). "newest" stays the default: it is what
+# the site has always done, and price sorts put POA rows (price IS NULL)
+# at one end regardless, so it should not be the first thing a visitor
+# meets. Every option is an indexed column — no computed sorts.
+SORTS = {
+    "newest":     ("first_seen", True),
+    "price_asc":  ("price", False),
+    "price_desc": ("price", True),
+}
+DEFAULT_SORT = "newest"
+
+
 @router.get("/")
 def home(
     request: Request,
@@ -123,6 +135,7 @@ def home(
     min_price: Optional[str] = Query(None),
     max_price: Optional[str] = Query(None),
     category: str = Query("sale"),
+    sort: str = Query(DEFAULT_SORT),
     page: int = Query(1, ge=1),
 ):
     """Search page — also the homepage. Server-rendered results."""
@@ -133,6 +146,8 @@ def home(
     max_price = _opt_int(max_price)
     if category not in ("sale", "rent"):
         category = "sale"
+    if sort not in SORTS:
+        sort = DEFAULT_SORT
 
     q = (db.table("properties")
          .select("title, slug, price, price_min, price_max, location, "
@@ -152,7 +167,14 @@ def home(
         q = q.lte("price", max_price)
 
     offset = (page - 1) * PER_PAGE
-    result = (q.order("first_seen", desc=True)
+    sort_col, sort_desc = SORTS[sort]
+    if sort_col == "price":
+        # POA rows (price IS NULL) sort to the top of an ascending list in
+        # Postgres NULLS-LAST terms and would otherwise fill page 1 with
+        # properties that show no price at all. Someone who asked to sort
+        # by price wants prices.
+        q = q.not_.is_("price", "null")
+    result = (q.order(sort_col, desc=sort_desc)
               .order("id", desc=True)  # tiebreak for same-crawl batches
               .range(offset, offset + PER_PAGE - 1)
               .execute())
@@ -206,6 +228,7 @@ def home(
             "min_price": min_price,
             "max_price": max_price,
             "category": category,
+            "sort": sort,
         },
     })
 

@@ -301,14 +301,35 @@ def stage_dedup():
     from scripts.persist_dedup import main as persist_main
     persist_main()
 
-    # Hide stock placeholder images (auction signs etc.) — see
-    # backend/db/admin_stats.sql. Non-fatal if the function is missing.
-    try:
-        db = get_client(timeout=600)
-        res = db.rpc("hide_generic_images", {}).execute()
-        print(f"  Generic images hidden on {res.data} properties")
-    except Exception as e:
-        print(f"  (generic-image pass skipped: {e})")
+    # DISABLED 2026-08-12. hide_generic_images() nulls the image on any
+    # property whose phash is shared by >= 5 properties. That was aimed at
+    # stock placeholders (auction boards, "no photo available") and caught
+    # 523 properties while the corpus was P24 houses.
+    #
+    # After ingesting BRK apartments-for-sale it hit 3,733 — 11% of all
+    # active properties left with no image. The groups are not
+    # placeholders: e.g. 212 properties, every one 4-bed, all 13-20M,
+    # across Kileleshwa/Kilimani/Lavington (three adjacent suburbs). A
+    # real placeholder shows up on 1-beds at 3M and 6-beds at 300M alike;
+    # these are coherent, so they are one development's render on
+    # individually-listed units.
+    #
+    # So the function was hiding the evidence of a dedup miss rather than
+    # fixing an image problem: 4,183 active listings sit in 96 such
+    # groups and 1,417 of their pairs are unresolved in the review queue,
+    # because price varies across a development and drags the score under
+    # the auto-merge cut.
+    #
+    # A blank card is worse than an honest shared render, so this stays
+    # off until the real question is settled: should a development's
+    # individually-listed units collapse into ONE property with a price
+    # range? The schema already supports that (price_min/price_max,
+    # beds_min/beds_max). Tracked in docs/product-backlog.md.
+    #
+    # If it is ever re-enabled, the threshold is not the fix — the rule is
+    # wrong in kind, not degree. Price/bed coherence separates a
+    # placeholder from a development; property count does not.
+    print("  (generic-image pass disabled — see comment / product-backlog)")
 
 
 # ── main ─────────────────────────────────────────────────────────────
