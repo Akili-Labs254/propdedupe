@@ -49,18 +49,46 @@
 
        Path is per-source (out/property24, out/buyrentkenya). Per-property
        counts — needed later for "your listing got N enquiries" — would just
-       append the slug, at the cost of thousands of distinct paths. -->
+       append the slug, at the cost of thousands of distinct paths.
+
+       CAMPAIGN CARRY-THROUGH: the ?ref= tag only exists on the landing URL.
+       By the time someone clicks out to a source listing they are two or
+       three pages deep and the tag is long gone, so the event landed as a
+       bare out/property24 and there was no way to say which campaign
+       produced a conversion. That is exactly the number a paid test needs —
+       cost per outbound click, per ad group — so we stash the ref on first
+       arrival and attach it to every outbound event for the rest of the
+       session.
+
+       sessionStorage, not localStorage: a ref should describe this visit,
+       not tag someone forever because they once arrived from a video. -->
   <script>
-    document.addEventListener("click", function (e) {
-      var a = e.target.closest && e.target.closest("a.source-link");
-      if (!a) return;
-      if (!window.goatcounter || !window.goatcounter.count) return;
-      window.goatcounter.count({
-        path: "out/" + (a.dataset.source || "unknown"),
-        title: "Outbound to source listing",
-        event: true
+    (function () {
+      var KEY = "fikia_ref";
+
+      // Capture on arrival. First ref of the session wins — if someone
+      // lands from an ad and later types a vanity URL, the ad still gets
+      // the credit for bringing them.
+      try {
+        var ref = new URLSearchParams(location.search).get("ref");
+        if (ref && !sessionStorage.getItem(KEY)) {
+          sessionStorage.setItem(KEY, ref.slice(0, 32));
+        }
+      } catch (err) { /* private mode: fall back to untagged events */ }
+
+      document.addEventListener("click", function (e) {
+        var a = e.target.closest && e.target.closest("a.source-link");
+        if (!a) return;
+        if (!window.goatcounter || !window.goatcounter.count) return;
+        var tag = "";
+        try { tag = sessionStorage.getItem(KEY) || ""; } catch (err) {}
+        window.goatcounter.count({
+          path: "out/" + (a.dataset.source || "unknown") + (tag ? "/" + tag : ""),
+          title: "Outbound to source listing",
+          event: true
+        });
       });
-    });
+    })();
   </script>
   {% endblock %}
 </body>

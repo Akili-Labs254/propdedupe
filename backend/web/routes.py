@@ -8,6 +8,7 @@ facts only, always link out to the source site, never rehost images
 import math
 import os
 import re
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -104,6 +105,35 @@ def suburb_from_slug(slug: str) -> str:
 templates.env.filters["suburb_slug"] = suburb_slug
 
 
+def days_listed(first_seen) -> Optional[int]:
+    """Days since we first saw this advert, or None if unknown.
+
+    NOT the same as days on the market: first_seen is when *we* first
+    crawled it, so anything that existed before 29 June 2026 reads as the
+    age of the corpus, not of the listing. The badge says "seen for" and
+    not "on the market for" precisely because of that, and it gets more
+    truthful every day the crawler runs.
+
+    Nobody else in this market shows it at all. Portals are paid by the
+    agent, and an advert visibly sitting unsold for two months is bad for
+    the person paying — which is exactly why it is useful to a buyer.
+    """
+    if not first_seen:
+        return None
+    try:
+        seen = datetime.fromisoformat(str(first_seen).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    if seen.tzinfo is None:
+        seen = seen.replace(tzinfo=timezone.utc)
+    days = (datetime.now(timezone.utc) - seen).days
+    # Clock skew or a future timestamp shouldn't render "-1 days ago".
+    return days if days >= 0 else None
+
+
+templates.env.filters["days_listed"] = days_listed
+
+
 def _opt_int(value: Optional[str]) -> Optional[int]:
     """HTML forms submit empty fields as '' — treat those (and junk)
     as 'no filter' instead of letting FastAPI 422 the whole request."""
@@ -153,7 +183,7 @@ def home(
          .select("title, slug, price, price_min, price_max, location, "
                  "bedrooms, bathrooms, beds_min, beds_max, baths_min, "
                  "baths_max, size_sqm, image_url, source_count, "
-                 "category", count="exact")
+                 "category, first_seen", count="exact")
          .eq("status", "active")
          .eq("category", category))
 

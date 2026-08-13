@@ -352,6 +352,37 @@ def test_sitemap_restricts_properties_to_multi_source(client, monkeypatch):
     assert captured.get("source_count") == 1   # .gt("source_count", 1)
 
 
+# ── listing age badge ────────────────────────────────────────────────
+
+def test_days_listed_handles_every_shape_postgrest_returns():
+    """Supabase hands back ISO strings, sometimes Z-suffixed, sometimes
+    naive. A crash here would 500 every card on the site."""
+    from datetime import datetime, timedelta, timezone
+    from backend.web.routes import days_listed
+    now = datetime.now(timezone.utc)
+    old = now - timedelta(days=12)
+
+    assert days_listed(old.isoformat()) == 12
+    assert days_listed(old.isoformat().replace("+00:00", "Z")) == 12
+    assert days_listed(old.replace(tzinfo=None).isoformat()) == 12
+    assert days_listed(now.isoformat()) == 0
+
+
+def test_days_listed_refuses_junk_rather_than_raising():
+    from backend.web.routes import days_listed
+    for junk in (None, "", "not-a-date", 12345):
+        assert days_listed(junk) is None, f"{junk!r} should be None"
+
+
+def test_days_listed_never_returns_negative():
+    """Clock skew or a future first_seen must not render 'seen for -1
+    days' — return None and let the template hide the badge."""
+    from datetime import datetime, timedelta, timezone
+    from backend.web.routes import days_listed
+    future = datetime.now(timezone.utc) + timedelta(days=3)
+    assert days_listed(future.isoformat()) is None
+
+
 # ── sorting ──────────────────────────────────────────────────────────
 
 class SortRecorder:

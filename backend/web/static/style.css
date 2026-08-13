@@ -64,10 +64,15 @@ main { max-width: 1080px; margin: 0 auto; padding: 0 1rem 3rem; }
 .card h2 { font-size: 0.95rem; margin: 0.3rem 0; font-weight: 600; }
 .card .meta, .card .location { color: var(--muted); font-size: 0.85rem; margin: 0.15rem 0; }
 .badge {
-  display: inline-block; margin-top: 0.4rem; padding: 0.15rem 0.5rem;
+  display: inline-block; margin-top: 0.4rem; margin-right: 0.3rem;
+  padding: 0.15rem 0.5rem;
   background: #e6f4f1; color: var(--accent);
   border-radius: 999px; font-size: 0.75rem; font-weight: 600;
 }
+
+/* Age badge sits quieter than the multi-source one: it's context, not a
+   trust signal, and two loud pills on one card compete with the price. */
+.badge-age { background: #f1f1ef; color: #6b7280; }
 
 /* pagination */
 .pagination {
