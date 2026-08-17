@@ -171,7 +171,10 @@ def test_segment_page(client, monkeypatch):
     })
     r = client.get("/houses-for-sale/kilimani")
     assert r.status_code == 200
-    assert "Houses for Sale in Kilimani" in r.text
+    # "Homes", not "Houses": the URL prefix is frozen for SEO but the copy
+    # had to change once apartments-for-sale entered the corpus. The page
+    # must not claim to list houses while showing flats.
+    assert "Homes for Sale in Kilimani" in r.text
     assert "median KSh 35,000,000" in r.text
     assert "/houses-for-sale/kilimani/3-bedroom" in r.text
     assert "Lavington" in r.text               # adjacency link mesh
@@ -350,6 +353,59 @@ def test_sitemap_restricts_properties_to_multi_source(client, monkeypatch):
 
     assert client.get("/sitemap.xml").status_code == 200
     assert captured.get("source_count") == 1   # .gt("source_count", 1)
+
+
+# ── homepage indexing rules ──────────────────────────────────────────
+
+def _home(client, monkeypatch, query="/"):
+    use_db(monkeypatch, {
+        "properties": [FakeResult([PROP], count=200)],
+        "listings": [FakeResult([], count=0), FakeResult([], count=0)],
+        "suburb_stats": [FakeResult([])],
+    })
+    r = client.get(query)
+    assert r.status_code == 200
+    return r.text
+
+
+def test_bare_homepage_is_indexable(client, monkeypatch):
+    body = _home(client, monkeypatch, "/")
+    assert 'name="robots"' not in body
+    assert 'rel="canonical"' in body
+
+
+def test_rent_root_is_indexable(client, monkeypatch):
+    """Both category roots are real pages, not search results."""
+    body = _home(client, monkeypatch, "/?category=rent")
+    assert 'name="robots"' not in body
+    assert "/?category=rent" in body
+
+
+def test_paginated_homepage_is_noindexed(client, monkeypatch):
+    """Google indexed /?page=8&category=sale&location= and spent crawl
+    budget there instead of on the property pages earning the clicks."""
+    body = _home(client, monkeypatch, "/?page=8")
+    assert 'content="noindex,follow"' in body
+
+
+def test_filtered_homepage_is_noindexed(client, monkeypatch):
+    """Filter combinations are effectively infinite and near-duplicate."""
+    for q in ("/?location=Kilimani", "/?bedrooms=2", "/?max_price=9000000",
+              "/?sort=price_asc"):
+        assert 'content="noindex,follow"' in _home(client, monkeypatch, q), q
+
+
+def test_noindex_still_follows(client, monkeypatch):
+    """nofollow would strand the property pages behind a filtered view."""
+    body = _home(client, monkeypatch, "/?bedrooms=3")
+    assert "noindex,follow" in body
+    assert "nofollow" not in body
+
+
+def test_filtered_views_canonicalise_to_the_category_root(client, monkeypatch):
+    body = _home(client, monkeypatch, "/?category=sale&location=Karen&page=3")
+    assert 'rel="canonical"' in body
+    assert "location=Karen" not in body.split('rel="canonical"')[1][:120]
 
 
 # ── listing age badge ────────────────────────────────────────────────

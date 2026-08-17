@@ -58,8 +58,19 @@ _BEDS_RE = re.compile(r"^([1-8])-bedroom$")
 
 # URL prefix + copy per category. Adding a category = one entry here
 # (plus scraper URLs) — everything else derives from it.
+# NOTE the mismatch between prefix and plural on "sale". The URL prefix
+# is frozen: ~810 pages are indexed under /houses-for-sale/, and
+# re-prefixing would mean 301-ing all of them mid-SEO-ramp for a cosmetic
+# gain. The COPY is not frozen, and had to change on 2026-08-17: ingesting
+# BRK apartments-for-sale put 6,060 flats under pages titled "Houses for
+# Sale in X". Title/content mismatch is a real ranking signal, and it was
+# simply untrue.
+#
+# "Homes" over "Property" because it stays close to the keyword the pages
+# already rank for ("houses for sale <suburb>") while covering flats
+# honestly — "homes for sale" is a searched term in its own right.
 CATEGORIES = {
-    "sale": {"prefix": "houses-for-sale", "plural": "Houses",
+    "sale": {"prefix": "houses-for-sale", "plural": "Homes",
              "action": "for Sale"},
     "rent": {"prefix": "apartments-for-rent", "plural": "Apartments",
              "action": "for Rent"},

@@ -252,6 +252,23 @@ def home(
         "trust": trust,
         "suburb_prefix": "apartments-for-rent" if category == "rent"
                          else "houses-for-sale",
+        # Search-result views must not be indexed. Google found
+        # "/?page=8&category=sale&location=" and spent crawl budget on it
+        # — on a site with 810 sitemap URLs and 5 total clicks, attention
+        # spent on page 8 of a filtered homepage is attention not spent on
+        # the property pages that actually earn those clicks.
+        #
+        # Filter combinations are effectively infinite and near-duplicate,
+        # which is the classic faceted-navigation trap. The intended SEO
+        # surface is /houses-for-sale/{suburb}[/{n}-bedroom], not this.
+        #
+        # noindex,FOLLOW, not noindex,nofollow: the links through to
+        # property pages should still be crawled. And the category roots
+        # (/ and /?category=rent) stay indexable — they're real pages.
+        "noindex": bool(location or bedrooms is not None
+                        or min_price is not None or max_price is not None
+                        or page > 1 or sort != DEFAULT_SORT),
+        "canonical": f"/?category={category}" if category == "rent" else "/",
         "filters": {
             "location": location or "",
             "bedrooms": bedrooms,
