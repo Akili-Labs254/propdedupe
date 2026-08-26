@@ -8,6 +8,7 @@ Run: python -m scripts.scrape_property24
 from datetime import datetime
 from typing import Optional, Tuple
 
+from backend.scraper.base import is_end_of_pagination
 from backend.scraper.property24 import Property24Scraper
 from backend.db.save import save_listings
 
@@ -55,6 +56,7 @@ def _crawl_index(base_url: str, cap: int, category: str) -> Tuple[int, bool]:
     saved = 0
     empty_streak = 0
     fail_streak = 0
+    streak_is_end = True   # every failure so far was a 4xx
     complete = False
 
     for page in range(1, cap + 1):
@@ -65,20 +67,24 @@ def _crawl_index(base_url: str, cap: int, category: str) -> Tuple[int, bool]:
             html = scraper.fetch(url)
             listings = scraper.parse(html)
             fail_streak = 0
+            streak_is_end = True
         except Exception as e:
-            # Consecutive failures = end of pagination (sites 404 or
-            # error past the last page rather than serving empty pages).
             fail_streak += 1
+            # A streak only means "end of list" if every failure in it
+            # was a 4xx. One 5xx anywhere in the streak and we have no
+            # idea where the list ends. See base.is_end_of_pagination.
+            streak_is_end = streak_is_end and is_end_of_pagination(e)
             print(f"  Failed: {e} (fail streak {fail_streak})")
             if fail_streak >= 3:
-                # Sites 404 past the last page rather than serving an
-                # empty one, so this is a normal terminal condition, not
-                # an anomaly — hence complete=True. A mid-run IP block
-                # would also land here and wrongly look complete; the
-                # MIN_SCRAPE_RATIO guard in refresh.stage_stale is the
-                # second line of defence against that.
-                log(f"[P24/{category}] {fail_streak} failures in a row — done.")
-                complete = True
+                if streak_is_end:
+                    log(f"[P24/{category}] {fail_streak} 404s in a row — "
+                        "end of pagination.")
+                    complete = True
+                else:
+                    log(f"[P24/{category}] {fail_streak} server errors in a "
+                        "row — NOT the end of the list. Marking incomplete "
+                        "so stale detection skips this category.")
+                    complete = False
                 break
             continue
 
@@ -96,7 +102,8 @@ def _crawl_index(base_url: str, cap: int, category: str) -> Tuple[int, bool]:
         saved += len(listings)
         print(f"  Saved {len(listings)} listings ({saved} total)")
 
-    how = "reached end of pagination" if complete else f"stopped at cap ({cap})"
+    how = ("reached end of pagination" if complete
+           else f"INCOMPLETE — hit cap ({cap}) or server errors")
     log(f"[P24/{category}] {base_url.rsplit('/', 1)[-1]}: "
         f"{saved} saved — {how}.")
     return saved, complete

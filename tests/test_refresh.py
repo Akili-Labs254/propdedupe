@@ -158,22 +158,30 @@ def test_delist_runs_before_stale(flips):
 
 def test_scrapers_report_completeness(monkeypatch):
     """run() must return (saved, complete) — stage_scrape unpacks two
-    values and a bare int would raise."""
+    values and a bare int would raise.
+
+    Note the exception carries a real 404 status. An exception with no
+    status (a parse crash, say) is deliberately NOT treated as the end of
+    the list — we only know we walked off the end if the server said so.
+    """
     from scripts import scrape_property24, scrape_buyrentkenya
 
     for mod, name in ((scrape_property24, "P24"), (scrape_buyrentkenya, "BRK")):
-        class DeadScraper:
-            def fetch(self, url):
-                raise RuntimeError("404")
-
-            def parse(self, html):
-                return []
-
         attr = "Property24Scraper" if name == "P24" else "BuyRentKenyaScraper"
-        monkeypatch.setattr(mod, attr, lambda: DeadScraper())
+        _scraper_raising(monkeypatch, mod, attr, _http_error(404))
         saved, complete = mod.run(max_pages=5, category="sale")
         assert saved == 0
         assert complete is True, f"{name}: a 404 streak IS the end of the list"
+
+
+def test_unknown_exception_is_not_the_end_of_the_list(monkeypatch):
+    """A parse crash or any error without an HTTP status proves nothing
+    about pagination. Fail closed."""
+    from scripts import scrape_property24 as p24
+    _scraper_raising(monkeypatch, p24, "Property24Scraper",
+                     ValueError("parser blew up"))
+    _, complete = p24.run(max_pages=5, category="sale")
+    assert complete is False
 
 
 def test_multi_index_category_sums_and_ands(monkeypatch):
@@ -224,6 +232,98 @@ def test_p24_sale_stays_completable():
         "https://www.property24.co.ke/houses-for-sale-in-nairobi-p95"
     ], ("adding an uncrawlable index to P24 sale silently disables stale "
         "detection for the whole category — see ADR 0008 and probe_depth")
+
+
+# ── 404 vs 503: what a failure streak actually means ─────────────────
+
+def _scraper_raising(monkeypatch, mod, attr, exc):
+    class Boom:
+        def fetch(self, url):
+            raise exc
+
+        def parse(self, html):
+            return []
+
+    monkeypatch.setattr(mod, attr, lambda: Boom())
+    monkeypatch.setattr(mod, "save_listings", lambda *a, **k: None)
+
+
+def _http_error(code):
+    import requests
+    e = requests.HTTPError(f"{code} error")
+    e.response = type("R", (), {"status_code": code})()
+    return e
+
+
+def test_404_streak_is_the_end_of_the_list(monkeypatch):
+    """Both sites 404 past the last page — that IS how a full crawl ends."""
+    from scripts import scrape_property24 as p24
+    _scraper_raising(monkeypatch, p24, "Property24Scraper", _http_error(404))
+    saved, complete = p24.run(max_pages=10, category="sale")
+    assert (saved, complete) == (0, True)
+
+
+def test_503_streak_is_not_the_end_of_the_list(monkeypatch):
+    """2026-08-26: P24 threw 503s after 58 of 522 sale pages. The scraper
+    reported complete=True and only MIN_SCRAPE_RATIO stopped 41,000 live
+    listings being marked dead. A sick server tells you nothing about
+    where the list ends."""
+    from scripts import scrape_property24 as p24
+    _scraper_raising(monkeypatch, p24, "Property24Scraper", _http_error(503))
+    saved, complete = p24.run(max_pages=10, category="sale")
+    assert saved == 0
+    assert complete is False
+
+
+def test_timeout_streak_is_not_the_end_of_the_list(monkeypatch):
+    import requests
+    from scripts import scrape_buyrentkenya as brk
+    _scraper_raising(monkeypatch, brk, "BuyRentKenyaScraper",
+                     requests.exceptions.ReadTimeout("timed out"))
+    saved, complete = brk.run(max_pages=10, category="rent")
+    assert complete is False
+
+
+def test_one_5xx_poisons_an_otherwise_404_streak(monkeypatch):
+    """Mixed streak: if any failure was a server error we did not
+    establish the end of the list, however the others looked."""
+    from scripts import scrape_property24 as p24
+    errors = iter([_http_error(404), _http_error(503), _http_error(404)])
+
+    class Mixed:
+        def fetch(self, url):
+            raise next(errors)
+
+        def parse(self, html):
+            return []
+
+    monkeypatch.setattr(p24, "Property24Scraper", lambda: Mixed())
+    monkeypatch.setattr(p24, "save_listings", lambda *a, **k: None)
+    saved, complete = p24.run(max_pages=10, category="sale")
+    assert complete is False
+
+
+def test_a_success_resets_the_streak_verdict(monkeypatch):
+    """A 503 early on must not taint a genuine 404 ending later."""
+    from scripts import scrape_property24 as p24
+    seq = iter([_http_error(503), None, None,
+                _http_error(404), _http_error(404), _http_error(404)])
+
+    class Flaky:
+        def fetch(self, url):
+            exc = next(seq)
+            if exc:
+                raise exc
+            return "<html/>"
+
+        def parse(self, html):
+            return ["listing"]
+
+    monkeypatch.setattr(p24, "Property24Scraper", lambda: Flaky())
+    monkeypatch.setattr(p24, "save_listings", lambda *a, **k: None)
+    saved, complete = p24.run(max_pages=10, category="sale")
+    assert saved == 2
+    assert complete is True
 
 
 def test_hitting_the_cap_reports_incomplete(monkeypatch):

@@ -7,6 +7,7 @@ Run: python -m scripts.scrape_buyrentkenya
 """
 from typing import Optional, Tuple
 
+from backend.scraper.base import is_end_of_pagination
 from backend.scraper.buyrentkenya import BuyRentKenyaScraper
 from backend.db.save import save_listings
 
@@ -49,6 +50,7 @@ def _crawl_index(base_url: str, cap: int, category: str) -> Tuple[int, bool]:
     saved = 0
     empty_streak = 0
     fail_streak = 0
+    streak_is_end = True   # every failure so far was a 4xx
     complete = False
 
     for page in range(1, cap + 1):
@@ -59,18 +61,22 @@ def _crawl_index(base_url: str, cap: int, category: str) -> Tuple[int, bool]:
             html = scraper.fetch(url)
             listings = scraper.parse(html)
             fail_streak = 0
+            streak_is_end = True
         except Exception as e:
-            # BRK 404s past the last page (it does NOT serve an empty
-            # page), so consecutive failures = end of pagination.
             fail_streak += 1
+            # Only a streak of pure 4xx means end-of-list.
+            streak_is_end = streak_is_end and is_end_of_pagination(e)
             print(f"  Failed: {e} (fail streak {fail_streak})")
             if fail_streak >= 3:
-                # BRK 404s past the last page, so this is the normal way
-                # a full crawl ends — complete=True. A mid-run block also
-                # lands here; MIN_SCRAPE_RATIO in refresh.stage_stale is
-                # what stops that from mass-staling the source.
-                print(f"[BRK/{category}] {fail_streak} failures in a row — done.")
-                complete = True
+                if streak_is_end:
+                    print(f"[BRK/{category}] {fail_streak} 404s in a row — "
+                          "end of pagination.")
+                    complete = True
+                else:
+                    print(f"[BRK/{category}] {fail_streak} server errors in a "
+                          "row — NOT the end of the list. Marking incomplete "
+                          "so stale detection skips this category.")
+                    complete = False
                 break
             continue
 
@@ -88,7 +94,8 @@ def _crawl_index(base_url: str, cap: int, category: str) -> Tuple[int, bool]:
         saved += len(listings)
         print(f"  Saved {len(listings)} listings ({saved} total)")
 
-    how = "reached end of pagination" if complete else f"stopped at cap ({cap})"
+    how = ("reached end of pagination" if complete
+           else f"INCOMPLETE — hit cap ({cap}) or server errors")
     print(f"[BRK/{category}] {base_url.rsplit('/', 2)[-2]}: "
           f"{saved} saved — {how}.")
     return saved, complete

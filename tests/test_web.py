@@ -355,6 +355,86 @@ def test_sitemap_restricts_properties_to_multi_source(client, monkeypatch):
     assert captured.get("source_count") == 1   # .gt("source_count", 1)
 
 
+# ── segment page sorting ─────────────────────────────────────────────
+
+STATS_ROW = {"suburb": "westlands", "category": "sale", "bedrooms": 2,
+             "property_count": 390, "median_price": 7500000,
+             "low_price": 5000000, "high_price": 15000000,
+             "is_suburb_total": False}
+
+
+def _segment(client, monkeypatch, query):
+    log = []
+    real_table = FakeClient.table
+
+    class Rec:
+        def __init__(self, inner):
+            self._inner, self.not_ = inner, self
+
+        def order(self, col, desc=False):
+            log.append(("order", col, desc)); return self
+
+        def is_(self, col, val):
+            log.append(("is_", col, val)); return self
+
+        def __getattr__(self, name):
+            return lambda *a, **k: self
+
+        def execute(self):
+            return self._inner.execute()
+
+    use_db(monkeypatch, {
+        "suburb_stats": [FakeResult([STATS_ROW]), FakeResult([]),
+                         FakeResult([]), FakeResult([])],
+        "properties": [FakeResult([PROP], count=390)],
+    })
+    monkeypatch.setattr(
+        FakeClient, "table",
+        lambda self, name: (Rec(real_table(self, name))
+                            if name == "properties" else real_table(self, name)))
+    r = client.get(query)
+    assert r.status_code == 200, r.status_code
+    return log, r.text
+
+
+def test_segment_defaults_to_newest(client, monkeypatch):
+    log, _ = _segment(client, monkeypatch, "/houses-for-sale/westlands/2-bedroom")
+    assert ("order", "first_seen", True) in log
+
+
+def test_segment_sorts_by_price(client, monkeypatch):
+    """The Google Ads landing pages depend on this: an ad promising cheap
+    apartments must not open on the most expensive ones."""
+    log, _ = _segment(client, monkeypatch,
+                      "/houses-for-sale/westlands/2-bedroom?sort=price_asc")
+    assert ("order", "price", False) in log
+    assert ("is_", "price", "null") in log      # POA excluded
+
+
+def test_segment_rejects_unknown_sort(client, monkeypatch):
+    log, _ = _segment(client, monkeypatch,
+                      "/houses-for-sale/westlands/2-bedroom?sort=;drop")
+    cols = [c for kind, c, _ in log if kind == "order"]
+    assert cols == ["first_seen", "id"]
+
+
+def test_segment_canonical_ignores_sort(client, monkeypatch):
+    """Sorted variants must consolidate to the clean URL, or every segment
+    page becomes three competing duplicates in the index."""
+    _, body = _segment(client, monkeypatch,
+                       "/houses-for-sale/westlands/2-bedroom?sort=price_desc")
+    canon = body.split('rel="canonical" href="')[1].split('"')[0]
+    assert canon.endswith("/houses-for-sale/westlands/2-bedroom")
+    assert "sort=" not in canon
+
+
+def test_segment_pagination_keeps_sort(client, monkeypatch):
+    """Dropping sort on page 2 silently reverts the order mid-browse."""
+    _, body = _segment(client, monkeypatch,
+                       "/houses-for-sale/westlands/2-bedroom?sort=price_asc")
+    assert "sort=price_asc" in body
+
+
 # ── homepage indexing rules ──────────────────────────────────────────
 
 def _home(client, monkeypatch, query="/"):

@@ -56,9 +56,34 @@ Both sites 404 past the last page rather than serving an empty one, so
 that streak is the normal terminal condition, not an anomaly. Treating it
 as incomplete would make BRK unstaleable forever.
 
-A mid-run IP block also produces a 404 streak and would wrongly look
-complete. `MIN_SCRAPE_RATIO` is the second line of defence for that case,
-and is why it stays.
+### Amended 2026-08-26 — only 4xx counts
+
+The original version treated **any** exception streak as the end of the
+list, and noted that a mid-run block would wrongly look complete, with
+`MIN_SCRAPE_RATIO` as the second line of defence.
+
+That happened within two weeks. On 26 Aug P24 returned 503s after 58 of
+522 sale pages; rent 503'd on page one. Both reported `complete=True`,
+one having saved **zero** listings. The ratio guard caught both and
+skipped their stale passes — it worked exactly as designed — but the
+completeness flag itself was wrong, and the whole design rests on it.
+
+So `is_end_of_pagination` (backend/scraper/base.py) now inspects the
+status:
+
+| outcome | complete |
+|---|---|
+| 404 / 410 | **True** — we walked off the end |
+| 5xx | False — the server is unwell, we learned nothing |
+| timeout / connection error | False |
+| any exception with no HTTP status | False — fail closed |
+
+A streak is only "the end" if **every** failure in it was 4xx; one 5xx
+poisons it. A successful page resets the verdict, so a transient blip
+early on can't taint a genuine ending later.
+
+`MIN_SCRAPE_RATIO` stays. Two independent guards is the point — the
+26 Aug incident is precisely what happens when you rely on one.
 
 ## Consequences
 

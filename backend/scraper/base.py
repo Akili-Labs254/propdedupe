@@ -73,3 +73,25 @@ class BaseScraper:
     def parse(self, html: str) -> list[ScrapedListing]:
         """Each source implements this. Returns the listings from one page."""
         raise NotImplementedError
+
+
+def is_end_of_pagination(exc: Exception) -> bool:
+    """Did this exception mean "past the last page", or "server unwell"?
+
+    Both sites signal the end of a listing index by 404ing rather than
+    serving an empty page, so a failure streak is the normal way a full
+    crawl terminates. But a 503 streak looks identical to the caller —
+    and on 2026-08-26 P24 threw 503s after 58 of 522 sale pages, the
+    scraper reported complete=True, and stale detection was one guard
+    away from marking 41,000 live listings dead.
+
+    So: 4xx means we genuinely walked off the end of the list. 5xx, a
+    timeout, or a connection error means we learned nothing about where
+    the list ends, and the crawl must not be called complete.
+
+    BaseScraper.fetch already retries 429/5xx with backoff (0/10/30/60s),
+    so anything reaching here has survived ~100 seconds of trying.
+    """
+    resp = getattr(exc, "response", None)
+    status = getattr(resp, "status_code", None) if resp is not None else None
+    return status is not None and 400 <= status < 500
