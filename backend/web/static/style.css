@@ -146,3 +146,12 @@ main { max-width: 1080px; margin: 0 auto; padding: 0 1rem 3rem; }
 .pick-dismiss:has(input:checked) { background: #b3372f; color: #fff; border-color: #b3372f; }
 .batch-bar { position: sticky; bottom: 0; display: flex; gap: 1rem; align-items: center; justify-content: flex-end; padding: 0.8rem 1rem; background: var(--bg); border-top: 1px solid var(--line); }
 .batch-bar span { color: var(--muted); font-size: 0.9rem; }
+
+/* Sort control on segment pages. Deliberately plain and above the grid:
+   it is a utility, not a feature to advertise. */
+.sort-bar {
+  display: flex; align-items: center; gap: 0.5rem;
+  margin: 0 0 1rem; font-size: 0.9rem;
+}
+.sort-bar label { color: #6b7280; }
+.sort-bar .muted { color: #6b7280; font-size: 0.8rem; }

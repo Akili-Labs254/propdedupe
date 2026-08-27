@@ -41,13 +41,30 @@
 </nav>
 {% endif %}
 
+{# Sort is a GET form so the URL stays shareable and crawlable. The
+   canonical above always points at base_path, so sorted variants
+   consolidate rather than competing as duplicates. #}
+<form class="sort-bar" method="get" action="{{ base_path }}">
+  <label for="sort">Sort</label>
+  <select name="sort" id="sort" onchange="this.form.submit()">
+    <option value="newest" {% if sort == "newest" %}selected{% endif %}>Newest first</option>
+    <option value="price_asc" {% if sort == "price_asc" %}selected{% endif %}>Price: low to high</option>
+    <option value="price_desc" {% if sort == "price_desc" %}selected{% endif %}>Price: high to low</option>
+  </select>
+  <noscript><button type="submit">Go</button></noscript>
+  {% if sort != "newest" %}
+  <span class="muted">priced listings only</span>
+  {% endif %}
+</form>
+
 <section class="grid">
   {% for prop in properties %}
   {{ property_card(prop) }}
   {% endfor %}
 </section>
 
-{{ pagination(page, total_pages, base_path) }}
+{{ pagination(page, total_pages, base_path,
+              ("&sort=" ~ sort) if sort != "newest" else "") }}
 
 {% if neighbours %}
 <section class="nearby">

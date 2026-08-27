@@ -23,8 +23,8 @@ from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 
 from backend.db.client import get_client
 from backend.dedup.adjacency import ADJACENCY
-from backend.web.routes import (  # shared env + filters
-    suburb_from_slug, suburb_slug, templates,
+from backend.web.routes import (  # shared env + filters + sort options
+    DEFAULT_SORT, SORTS, suburb_from_slug, suburb_slug, templates,
 )
 
 router = APIRouter(include_in_schema=False)
@@ -130,7 +130,8 @@ def segment_stats(db, suburb: str, category: str,
 
 
 def fetch_properties(db, suburb: str, category: str,
-                     bedrooms: Optional[int], page: int):
+                     bedrooms: Optional[int], page: int,
+                     sort: str = DEFAULT_SORT):
     q = (db.table("properties")
          .select("title, slug, price, price_min, price_max, location, "
                  "bedrooms, bathrooms, beds_min, beds_max, baths_min, "
@@ -141,8 +142,15 @@ def fetch_properties(db, suburb: str, category: str,
          .eq("suburb", suburb))
     if bedrooms is not None:
         q = q.eq("bedrooms", bedrooms)
+
+    sort_col, sort_desc = SORTS.get(sort, SORTS[DEFAULT_SORT])
+    if sort_col == "price":
+        # Same rule as the home route: someone who asked to sort by price
+        # does not want a page of "Price on application".
+        q = q.not_.is_("price", "null")
+
     offset = (page - 1) * PER_PAGE
-    return (q.order("first_seen", desc=True)
+    return (q.order(sort_col, desc=sort_desc)
             .order("id", desc=True)
             .range(offset, offset + PER_PAGE - 1)
             .execute())
@@ -177,7 +185,10 @@ def _suburbs_index(request: Request, category: str):
 
 
 def _segment_page(request: Request, suburb: str, category: str,
-                  bedrooms: Optional[int], page: int):
+                  bedrooms: Optional[int], page: int,
+                  sort: str = DEFAULT_SORT):
+    if sort not in SORTS:
+        sort = DEFAULT_SORT
     cfg = CATEGORIES[category]
     raw, suburb = suburb, suburb_from_slug(suburb)
     slug = suburb_slug(suburb)
@@ -218,7 +229,7 @@ def _segment_page(request: Request, suburb: str, category: str,
     # — so nothing new gets discovered through us.
     thin = stats["property_count"] < MIN_SEGMENT
 
-    result = fetch_properties(db, suburb, category, bedrooms, page)
+    result = fetch_properties(db, suburb, category, bedrooms, page, sort)
     total = result.count or 0
     total_pages = max(1, math.ceil(total / PER_PAGE))
 
@@ -240,6 +251,7 @@ def _segment_page(request: Request, suburb: str, category: str,
         "suburb": suburb,
         "suburb_name": display_name(suburb),
         "bedrooms": bedrooms,
+        "sort": sort,
         "stats": stats,
         "properties": result.data,
         "total": total,
@@ -272,25 +284,31 @@ def rent_index(request: Request):
 
 
 @router.get("/houses-for-sale/{suburb}")
-def sale_suburb(request: Request, suburb: str, page: int = Query(1, ge=1)):
-    return _segment_page(request, suburb, "sale", None, page)
+def sale_suburb(request: Request, suburb: str, page: int = Query(1, ge=1),
+                sort: str = Query(DEFAULT_SORT)):
+    return _segment_page(request, suburb, "sale", None, page, sort)
 
 
 @router.get("/apartments-for-rent/{suburb}")
-def rent_suburb(request: Request, suburb: str, page: int = Query(1, ge=1)):
-    return _segment_page(request, suburb, "rent", None, page)
+def rent_suburb(request: Request, suburb: str, page: int = Query(1, ge=1),
+                sort: str = Query(DEFAULT_SORT)):
+    return _segment_page(request, suburb, "rent", None, page, sort)
 
 
 @router.get("/houses-for-sale/{suburb}/{beds_segment}")
 def sale_suburb_beds(request: Request, suburb: str, beds_segment: str,
-                     page: int = Query(1, ge=1)):
-    return _segment_page(request, suburb, "sale", _parse_beds(beds_segment), page)
+                     page: int = Query(1, ge=1),
+                     sort: str = Query(DEFAULT_SORT)):
+    return _segment_page(request, suburb, "sale",
+                         _parse_beds(beds_segment), page, sort)
 
 
 @router.get("/apartments-for-rent/{suburb}/{beds_segment}")
 def rent_suburb_beds(request: Request, suburb: str, beds_segment: str,
-                     page: int = Query(1, ge=1)):
-    return _segment_page(request, suburb, "rent", _parse_beds(beds_segment), page)
+                     page: int = Query(1, ge=1),
+                     sort: str = Query(DEFAULT_SORT)):
+    return _segment_page(request, suburb, "rent",
+                         _parse_beds(beds_segment), page, sort)
 
 
 # ── sitemap + robots ─────────────────────────────────────────────────
