@@ -37,12 +37,12 @@ def fetch_listing_details(db, ids: List[int]) -> Dict[int, dict]:
     for i in range(0, len(ids), 100):
         chunk = ids[i:i + 100]
         result = (
-            db.table("listings")
+            _with_retry(lambda chunk=chunk: db.table("listings")
             .select("id, source_id, source_listing_id, status, first_seen, "
                     "cluster_key, category, title, price, bedrooms, baths, "
                     "location, size_sqm, image_url")
             .in_("id", chunk)
-            .execute()
+            .execute())
         )
         for row in result.data:
             details[row["id"]] = row
@@ -206,9 +206,10 @@ def snapshot_slug_state(db) -> Dict[int, str]:
     pid_to_slug = {}
     offset = 0
     while True:
-        batch = (db.table("properties").select("id, slug")
-                 .not_.is_("slug", "null")
-                 .order("id").range(offset, offset + 999).execute())
+        batch = _with_retry(lambda o=offset: db.table("properties")
+                            .select("id, slug")
+                            .not_.is_("slug", "null")
+                            .order("id").range(o, o + 999).execute())
         if not batch.data:
             break
         for row in batch.data:
@@ -220,9 +221,10 @@ def snapshot_slug_state(db) -> Dict[int, str]:
     snapshot = {}
     offset = 0
     while True:
-        batch = (db.table("listings").select("id, property_id")
-                 .not_.is_("property_id", "null")
-                 .order("id").range(offset, offset + 999).execute())
+        batch = _with_retry(lambda o=offset: db.table("listings")
+                            .select("id, property_id")
+                            .not_.is_("property_id", "null")
+                            .order("id").range(o, o + 999).execute())
         if not batch.data:
             break
         for row in batch.data:
@@ -272,8 +274,9 @@ SNAPSHOT_SHRINK_GUARD = 0.7
 
 def stored_snapshot_size(db) -> int:
     """Row count of the crash-safe copy — one request, not a full read."""
-    res = (db.table("slug_snapshot").select("listing_id", count="exact")
-           .limit(1).execute())
+    res = _with_retry(lambda: db.table("slug_snapshot")
+                      .select("listing_id", count="exact")
+                      .limit(1).execute())
     return res.count or 0
 
 
@@ -311,8 +314,9 @@ def load_slug_snapshot_fallback(db) -> Dict[int, str]:
     out = {}
     offset = 0
     while True:
-        batch = (db.table("slug_snapshot").select("listing_id, slug")
-                 .order("listing_id").range(offset, offset + 999).execute())
+        batch = _with_retry(lambda o=offset: db.table("slug_snapshot")
+                            .select("listing_id, slug")
+                            .order("listing_id").range(o, o + 999).execute())
         if not batch.data:
             break
         for row in batch.data:
@@ -392,6 +396,17 @@ def _with_retry(make_call, attempts=4):
     its own first attempt had just created (23505 on slug). Property
     writes now use upsert(on_conflict="slug") so a replay is a no-op
     update instead of a crash. Keep it that way for anything new.
+
+    EVERY READ IN THIS FILE IS WRAPPED, added 2026-08-27. Reads are
+    idempotent by definition, so none of the caution above applies to
+    them — and an unwrapped one is a live outage waiting to happen.
+    On 26 and 27 Aug the review_decisions fetch died on a dropped TLS
+    handshake, twice, each time AFTER clear_previous_results had emptied
+    properties and matches. The site served zero listings for 17 hours.
+    postgrest's own send_with_retry does not cover connect timeouts.
+
+    If you add a read, wrap it. The cost is one lambda; the cost of not
+    doing it is the whole site.
     """
     for attempt in range(attempts):
         try:
@@ -531,11 +546,11 @@ def main():
     decisions = {}
     offset = 0
     while True:
-        batch = (db.table("review_decisions")
-                 .select("listing_a_id, listing_b_id, decision")
-                 .order("listing_a_id")
-                 .range(offset, offset + 999)
-                 .execute())
+        batch = _with_retry(lambda o=offset: db.table("review_decisions")
+                            .select("listing_a_id, listing_b_id, decision")
+                            .order("listing_a_id")
+                            .range(o, o + 999)
+                            .execute())
         if not batch.data:
             break
         for row in batch.data:
@@ -875,16 +890,16 @@ def main():
     offset = 0
     BATCH_SIZE = 1000
     while True:
-        batch = (db.table("listings")
-                 .select("id, cluster_key, property_id, source_id, "
-                         "source_listing_id, status, first_seen, category, "
-                         "title, price, location, bedrooms, baths, size_sqm, "
-                         "image_url")
-                 .eq("source_id", 2)
-                 .not_.is_("cluster_key", "null")
-                 .order("id")
-                 .range(offset, offset + BATCH_SIZE - 1)
-                 .execute())
+        batch = _with_retry(lambda o=offset: db.table("listings")
+                            .select("id, cluster_key, property_id, source_id, "
+                                    "source_listing_id, status, first_seen, "
+                                    "category, title, price, location, "
+                                    "bedrooms, baths, size_sqm, image_url")
+                            .eq("source_id", 2)
+                            .not_.is_("cluster_key", "null")
+                            .order("id")
+                            .range(o, o + BATCH_SIZE - 1)
+                            .execute())
         if not batch.data:
             break
         all_p24.extend(batch.data)
@@ -1062,9 +1077,10 @@ if __name__ == "__main__":
         alloc = SlugAllocator({})
         offset = 0
         while True:
-            batch = (db.table("properties").select("slug")
-                     .not_.is_("slug", "null")
-                     .order("id").range(offset, offset + 999).execute())
+            batch = _with_retry(lambda o=offset: db.table("properties")
+                                .select("slug")
+                                .not_.is_("slug", "null")
+                                .order("id").range(o, o + 999).execute())
             if not batch.data:
                 break
             alloc._claimed.update(r["slug"] for r in batch.data)
