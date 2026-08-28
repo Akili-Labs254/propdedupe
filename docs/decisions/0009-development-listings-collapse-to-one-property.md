@@ -192,6 +192,44 @@ The figures below assume the threshold of 4.
   than the figures quoted here. Re-measure from the script, not from this
   table, before quoting anything publicly.
 
+## Found while verifying the ad landing pages: BRK has no intra-source dedup
+
+The Kilimani 1-bed page showed the same rendered interior repeated down the
+grid. Investigating it turned up a separate defect, and a cheaper fix than
+this ADR describes.
+
+Those 223 listings are **all BuyRentKenya**, and every one has a distinct
+`image_url` — so a distinct `cluster_key`, so step 2 cannot group them.
+But they carry only **6 distinct phashes**, two of which cover 174
+listings. BRK serves one photograph under ninety-six different URLs. The
+perceptual hash sees through it; `image_url` cannot.
+
+Nothing in the pipeline looks at this. **Step 1 compares across sources
+only; step 2 runs on P24 only.** Intra-BRK duplication has never been
+deduplicated at all, and the asymmetry shows:
+
+| source | collapsible groups | rows removed | biggest |
+|---|---|---|---|
+| BuyRentKenya | 228 | **3,807** | 259 |
+| Property24 | 36 | 80 | 12 |
+
+Grouping on exact `image_phash` + category + beds + price. P24's figure is
+small precisely because `cluster_key` already does this job there.
+
+This matters for sequencing. An intra-source hash pass is **higher
+confidence and cheaper** than the development key: exact image equality
+plus agreeing price and bed count is close to conclusive, it reuses the
+blocking and scoring machinery already measured at ~96%, and it needs no
+new rule. It removes fewer rows (3,807 against 10,212) but it removes the
+ones most visible on the landing pages.
+
+**Do the intra-BRK pass first, then re-measure this ADR's collapse.** The
+two cuts overlap but neither contains the other — the hash pass catches
+identical photos under different headlines, the development key catches
+identical text under different photos. How much of the 10,212 survives the
+hash pass is unknown and should be measured, not assumed, before the
+union-find refactor below is attempted.
+
 ## Open: where this runs in the pipeline
 
 The rule is settled; its position is not, and the choice matters.
