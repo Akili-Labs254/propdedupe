@@ -19,6 +19,26 @@ import requests
 from backend.common import config
 
 
+class ParserOutOfDate(RuntimeError):
+    """The source's markup changed and parse() can no longer read it.
+
+    Raised INSTEAD of returning an empty list, and the distinction is the
+    whole point. An empty parse is indistinguishable from a genuinely empty
+    page, so the scraper reads it as the end of pagination, reports
+    `complete=True`, and clears stale detection to mark every unseen
+    listing as removed from the site.
+
+    That is exactly what BRK's 2026-09-01 re-platform triggered: the parser
+    silently returned [] on page 1 and the run reported a complete crawl of
+    zero listings. Only MIN_SCRAPE_RATIO stood between that and ~13,800
+    listings being marked dead.
+
+    An exception carries no HTTP status, so `is_end_of_pagination` returns
+    False for it (ADR 0008) — the run fails closed, `complete` stays False,
+    and the stale pass is skipped. Loud and safe beats quiet and wrong.
+    """
+
+
 @dataclass
 class ScrapedListing:
     """The normalized listing shape every scraper must produce."""
