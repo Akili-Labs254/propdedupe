@@ -152,6 +152,33 @@ def _card_image(card) -> Optional[str]:
     return None
 
 
+# A location is a place name — short, wordy, no money and no marketing.
+# Anything failing these is a mis-selected fragment, and accepting it is
+# worse than accepting nothing: `location` feeds suburb assignment, so a
+# polluted value silently removes the listing from its segment page (and
+# from the pages the ads point at).
+LOCATION_REJECT_RE = re.compile(
+    r"KSh|KES|\bfrom\b|\bbedroom\b|\bapartment\b|\bfor sale\b|\bfor rent\b",
+    re.I)
+LOCATION_MAX_LEN = 40
+
+
+def _clean_location(value: Optional[str]) -> Optional[str]:
+    """Return value if it plausibly names a place, else None."""
+    if not value:
+        return None
+    # Headlines are pipe-delimited; a location never is. Keep the head.
+    candidate = value.split("|")[0].strip(" ,-–—")
+    if not candidate or len(candidate) > LOCATION_MAX_LEN:
+        return None
+    if candidate.isdigit() or LOCATION_REJECT_RE.search(candidate):
+        return None
+    # "Buruburu, Nairobi" is fine; a sentence is not.
+    if len(candidate.split()) > 6:
+        return None
+    return candidate
+
+
 def _location_from_slug(slug: str) -> Optional[str]:
     """Last-resort area name: '...-for-sale-buruburu-3672030' -> 'Buruburu'."""
     parts = SLUG_ID_RE.sub("", slug).split("-")
@@ -268,7 +295,15 @@ class BuyRentKenyaScraper(BaseScraper):
             # the slug are the same digits, so the old form is recoverable.
             listing_id = ("item-" + id_match.group(1)) if id_match else slug
 
-            segments = [s.strip() for s in card.get_text("|").split("|")
+            # Separator must be a character that cannot occur in the page's
+            # own text. "|" was the obvious choice and the wrong one: agent
+            # headlines are full of them ("...in Kilimani | Off-Plan | From
+            # KSh 6 Million"), so titles split across segments, the title
+            # lookup below missed, and the parse_title fallback swallowed
+            # the rest of the headline as the location. ASCII unit
+            # separator can't appear in rendered HTML text.
+            SEP = "\x1f"
+            segments = [s.strip() for s in card.get_text(SEP).split(SEP)
                         if s.strip()]
             text = " ".join(segments)
 
@@ -283,15 +318,18 @@ class BuyRentKenyaScraper(BaseScraper):
 
             # Location sits immediately after the title in the card's text
             # flow ("... With SQ | Buruburu, Nairobi | 4 | Bedrooms ...").
+            # Three sources, best first, each validated before it is
+            # accepted. Without the validation a drifting selector silently
+            # writes marketing copy into `location`, which then feeds suburb
+            # assignment and drops the listing off its segment page.
             location = None
             if title and title in segments:
                 idx = segments.index(title)
                 if idx + 1 < len(segments):
-                    nxt = segments[idx + 1]
-                    if nxt and not nxt.isdigit():
-                        location = nxt
+                    location = _clean_location(segments[idx + 1])
             if not location and title:
-                _, location = parse_title(title)
+                _, from_title = parse_title(title)
+                location = _clean_location(from_title)
             if not location:
                 location = _location_from_slug(slug)
 

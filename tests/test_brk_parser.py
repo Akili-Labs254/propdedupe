@@ -138,6 +138,31 @@ def test_images_use_one_canonical_rendition(sale_listings):
     assert all(l.image_urls[0].endswith("_medium.webp") for l in sale_listings)
 
 
+def test_location_is_a_place_not_marketing_copy(sale_listings, rent_listings):
+    """Shipped broken: cards were split on "|", but agent headlines are full
+    of pipes ("...in Kilimani | Off-Plan | From KSh 6 Million"), so the
+    title lookup missed and the fallback swallowed the headline. ~5% of BRK
+    locations became marketing copy, and since location feeds suburb
+    assignment, those listings fell off their segment pages."""
+    for l in sale_listings + rent_listings:
+        loc = l.location
+        assert loc, f"no location: {l.source_listing_id}"
+        assert "|" not in loc, f"pipe in location: {loc!r}"
+        assert len(loc) <= 40, f"location too long: {loc!r}"
+        for junk in ("ksh", "kes", "bedroom", "for sale", "for rent"):
+            assert junk not in loc.casefold(), f"{junk!r} in location: {loc!r}"
+
+
+def test_clean_location_rejects_headline_fragments():
+    from backend.scraper.buyrentkenya import _clean_location
+    assert _clean_location("Buruburu, Nairobi") == "Buruburu, Nairobi"
+    assert _clean_location("Kilimani | Off-Plan | From KSh 6 Million") == "Kilimani"
+    assert _clean_location("From KSh 6 Million") is None
+    assert _clean_location("1 Bedroom Apartment for Sale") is None
+    assert _clean_location("") is None
+    assert _clean_location(None) is None
+
+
 def test_plot_acreage_does_not_become_size_sqm(sale_listings):
     """Cards show plot acreage; P24 reports floor area. Mixing them would
     corrupt both cluster_key and the scorer's size signal."""
