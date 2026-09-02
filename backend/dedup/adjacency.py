@@ -43,6 +43,26 @@ _STRIP_PREFIXES = re.compile(
     re.IGNORECASE
 )
 
+# City/county names that trail a suburb rather than naming one. Stripped
+# only from the END and never in full, so "nairobi cbd" survives intact.
+# Added 2026-09-02: BRK's rebuilt cards render location as
+# "Buruburu, Nairobi"; the old JSON-LD gave the bare suburb.
+_CITY_QUALIFIERS = (
+    'kenya',
+    'nairobi county',
+    'nairobi',
+    'mombasa county',
+    'mombasa',
+    'kiambu county',
+    'kiambu',
+    'kajiado county',
+    'kajiado',
+    'machakos county',
+    'machakos',
+    'nakuru',
+    'kisumu',
+)
+
 # Road/street suffix variants → canonical form
 _ROAD_VARIANTS = {
     ' rd': ' road',
@@ -168,6 +188,26 @@ def normalize_suburb(raw: str) -> str:
 
     # Strip trailing punctuation (BRK has "Lavington Green.")
     name = name.rstrip('.,;:!?')
+
+    # Commas are word boundaries, not part of the name. BRK's re-platformed
+    # cards give "Buruburu, Nairobi" where the old JSON-LD gave "Buruburu",
+    # and the prefix fallback below only matches on `suburb + " "` — so a
+    # comma silently created a second, parallel suburb for every area:
+    # 424 properties under "kilimani, nairobi" and 13 under "kilimani",
+    # each with its own segment page and neither complete.
+    name = name.replace(',', ' ')
+    name = ' '.join(name.split())
+
+    # Then drop the city/county qualifier now trailing the real name.
+    # Looped, because "Runda, Nairobi, Kenya" stacks them. Never strips
+    # down to nothing — "nairobi cbd" keeps its head.
+    for _ in range(3):
+        for qualifier in _CITY_QUALIFIERS:
+            if name.endswith(' ' + qualifier):
+                name = name[: -(len(qualifier) + 1)].strip()
+                break
+        else:
+            break
 
     # Strip prefixes like "Off Kiambu Road" → "kiambu road"
     name = _STRIP_PREFIXES.sub('', name).strip()
