@@ -95,6 +95,12 @@ class BaseScraper:
         raise NotImplementedError
 
 
+# The ONLY statuses that mean "there is no such page". Everything else
+# fails closed. Kept as an explicit set rather than a range so that adding
+# a status is a deliberate decision with a reason, not a boundary tweak.
+END_OF_LIST_STATUSES = frozenset({404, 410})
+
+
 def is_end_of_pagination(exc: Exception) -> bool:
     """Did this exception mean "past the last page", or "server unwell"?
 
@@ -105,13 +111,32 @@ def is_end_of_pagination(exc: Exception) -> bool:
     scraper reported complete=True, and stale detection was one guard
     away from marking 41,000 live listings dead.
 
-    So: 4xx means we genuinely walked off the end of the list. 5xx, a
-    timeout, or a connection error means we learned nothing about where
-    the list ends, and the crawl must not be called complete.
+    So: "not found" means we genuinely walked off the end of the list.
+    Anything else — 5xx, a timeout, a connection error, or a refusal —
+    means we learned nothing about where the list ends, and the crawl must
+    not be called complete.
 
     BaseScraper.fetch already retries 429/5xx with backoff (0/10/30/60s),
     so anything reaching here has survived ~100 seconds of trying.
+
+    2026-09-02 — NOT all of 4xx. This previously read
+    `400 <= status < 500`, which disagreed with ADR 0008's own table
+    (404/410 only) and swallowed every "you may not have this" status.
+    BuyRentKenya began returning **403** to GitHub's runners that day;
+    all three indexes reported `complete=True` on zero listings, and
+    MIN_SCRAPE_RATIO was again the only thing standing between that and
+    12,252 listings marked dead.
+
+    The distinction that matters is refusal vs absence:
+
+    | status              | complete | why                              |
+    |---------------------|----------|----------------------------------|
+    | 404, 410            | True     | the page is not there            |
+    | 401, 403            | False    | it is there; we were refused     |
+    | 429                 | False    | rate limited, not finished       |
+    | other 4xx           | False    | fail closed on the unfamiliar    |
+    | 5xx / timeout / conn| False    | server unwell, we learned nothing|
     """
     resp = getattr(exc, "response", None)
     status = getattr(resp, "status_code", None) if resp is not None else None
-    return status is not None and 400 <= status < 500
+    return status in END_OF_LIST_STATUSES

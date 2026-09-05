@@ -64,13 +64,14 @@ def _crawl_index(base_url: str, cap: int, category: str) -> Tuple[int, bool]:
             streak_is_end = True
         except Exception as e:
             fail_streak += 1
-            # Only a streak of pure 4xx means end-of-list.
+            # Only a streak of pure "not found" means end-of-list. A 403 is
+            # a refusal, not an absence — see is_end_of_pagination.
             streak_is_end = streak_is_end and is_end_of_pagination(e)
             print(f"  Failed: {e} (fail streak {fail_streak})")
             if fail_streak >= 3:
                 if streak_is_end:
-                    print(f"[BRK/{category}] {fail_streak} 404s in a row — "
-                          "end of pagination.")
+                    print(f"[BRK/{category}] {fail_streak} not-founds in a "
+                          "row — end of pagination.")
                     complete = True
                 else:
                     print(f"[BRK/{category}] {fail_streak} server errors in a "

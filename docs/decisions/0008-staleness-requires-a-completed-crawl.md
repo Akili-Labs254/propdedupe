@@ -85,6 +85,36 @@ early on can't taint a genuine ending later.
 `MIN_SCRAPE_RATIO` stays. Two independent guards is the point — the
 26 Aug incident is precisely what happens when you rely on one.
 
+### Amended 2026-09-02 — refusal is not absence
+
+The table above says 404/410. **The code said `400 <= status < 500`**, and
+the two disagreed for a month without anyone noticing, because nothing
+exercised it and no 4xx other than 404 had ever occurred.
+
+On 2 Sep BuyRentKenya — newly behind Cloudflare after its re-platform —
+began returning **403** to GitHub's runners. All three indexes hit a
+three-page 403 streak, reported `complete=True` on **zero listings saved**,
+and the log cheerfully announced "3 404s in a row — end of pagination".
+`MIN_SCRAPE_RATIO` skipped the stale pass and the dead-parser check failed
+the job, so nothing was lost. That is the third consecutive incident where
+the ratio guard was the last line rather than the second.
+
+The distinction the original wording missed is between **absence** and
+**refusal**. A 404 says the page is not there, which is what the end of a
+list looks like. A 401, 403 or 429 says the page is there and you may not
+have it, which says nothing whatever about how long the list is.
+
+`END_OF_LIST_STATUSES = frozenset({404, 410})` — an explicit set, not a
+range, so widening it requires a deliberate decision recorded here.
+`tests/test_scraper_base.py` now covers every branch; the absence of any
+test on this function is why the ADR and the implementation were allowed
+to drift apart.
+
+**Operational consequence:** BRK now blocks datacenter IPs, as P24 already
+did. The scheduled GitHub workflow can no longer scrape either source, so
+the automation this project relied on is gone until it runs from a
+residential IP. That is a separate problem from this ADR, and a bigger one.
+
 ## Consequences
 
 - A capped category never stales. Dead rentals accumulate until a crawl

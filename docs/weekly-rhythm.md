@@ -46,26 +46,64 @@ the probe script, the ads prep — was admin or planning.
 
 ## Monday
 
-- Check the weekend's CI runs (BRK, light daily + full Mon/Wed/Fri)
 - Pick **one** focus for the week and **one** video theme. The focus is
   usually a build item, but "get the ads test live" or "find and read
   three property groups" are equally valid weeks
 - Write both down. Anything not on that list is next week's problem
 
-## Wednesday
+## Scraping is manual — both sources, since 2026-09-02
 
-- **Manual P24 crawl** — can't run in CI (datacenter IPs blocked), needs
-  a residential connection and several hours. Start it before bed:
+BRK went behind Cloudflare in its re-platform and now 403s GitHub's
+runners; P24 has blocked datacenter IPs since July. **The CI schedules are
+commented out** (see `.github/workflows/refresh.yml`), so nothing crawls
+unless you run it. Nothing will remind you.
 
-  ```
-  set -o pipefail
-  LOG=logs/refresh-$(date +%Y%m%d-%H%M).log
-  caffeinate -is python -u -m scripts.refresh --all --sources p24 \
-      --rent-max-pages 1500 2>&1 | tee "$LOG"
-  echo "exit=$? finished $(date)" | tee -a "$LOG"
-  ```
+That is the cost of manual, stated plainly: P24 sat six days stale before
+anyone noticed, and "we check every advert" is the product's whole claim.
+If a fortnight goes by, the honest move is to fix the automation rather
+than keep believing the claim.
 
-- Morning after: `grep -E "exit=|SKIPPING|complete=|→ stale" logs/refresh-*.log`
+### Tuesday and Friday nights — both sources
+
+Start before bed, on the residential connection, plugged in:
+
+```
+set -o pipefail
+LOG=logs/refresh-$(date +%Y%m%d-%H%M).log
+caffeinate -is python -u -m scripts.refresh --scrape --hashes --stale \
+    --sources both --rent-max-pages 1500 2>&1 | tee "$LOG"
+echo "exit=$? finished $(date)" | tee -a "$LOG"
+```
+
+`--scrape --hashes --stale` deliberately, **not** `--all`: this corrects
+`listings` without rebuilding `properties`, so nothing user-visible
+changes overnight while you are asleep and unable to check it.
+
+### Morning after — read before rebuilding
+
+```
+grep -E "exit=|SKIPPING|complete=|403|Forbidden|→ stale" logs/refresh-*.log | tail -30
+```
+
+Then, only if the numbers look sane:
+
+```
+python -u -m scripts.persist_dedup 2>&1 | tee logs/rebuild-$(date +%Y%m%d-%H%M).log
+```
+
+Check the site afterwards — the homepage and the four ad landing URLs.
+`persist_dedup` clears before it rebuilds, so a crash mid-run leaves the
+site empty. It has happened twice (26 and 27 Aug), and until build-then-swap
+lands, a human confirming afterwards is the only safety net there is.
+
+### What to look for
+
+| signal | meaning |
+|---|---|
+| `403` / `Forbidden` | blocked, not finished — the crawl learned nothing |
+| `SKIPPING stale pass` | a guard fired; find out which before using `--force` |
+| `complete=False` | capped or interrupted; that category won't stale |
+| a big `→ stale` count | possibly real (BRK dropped ~1,600 legitimately on 2 Sep), possibly a broken parser. Check the saved count first |
 
 ## Friday
 

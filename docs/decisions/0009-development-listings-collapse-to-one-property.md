@@ -192,43 +192,81 @@ The figures below assume the threshold of 4.
   than the figures quoted here. Re-measure from the script, not from this
   table, before quoting anything publicly.
 
-## Found while verifying the ad landing pages: BRK has no intra-source dedup
+## Re-measured 2026-09-02, after the BRK re-platform
 
-The Kilimani 1-bed page showed the same rendered interior repeated down the
-grid. Investigating it turned up a separate defect, and a cheaper fix than
-this ADR describes.
+BuyRentKenya moved to a new stack on 1 September and removed a large
+amount of inventory in the process — including all 551 "1 Bed Apartment
+with En Suite in Kilimani" adverts that were the worst example in this
+document. They are now delisted or stale, correctly caught by the stale
+pass. The problem partly solved itself.
 
-Those 223 listings are **all BuyRentKenya**, and every one has a distinct
-`image_url` — so a distinct `cluster_key`, so step 2 cannot group them.
-But they carry only **6 distinct phashes**, two of which cover 174
-listings. BRK serves one photograph under ninety-six different URLs. The
-perceptual hash sees through it; `image_url` cannot.
+| | 28 Aug | 2 Sep |
+|---|---|---|
+| active properties | 35,088 | 34,142 |
+| rows removed at threshold 4 | 10,212 | **8,835** |
+| groups at threshold 4 | — | 848 |
+| biggest group | 239 | **114** |
 
-Nothing in the pipeline looks at this. **Step 1 compares across sources
-only; step 2 runs on P24 only.** Intra-BRK duplication has never been
-deduplicated at all, and the asymmetry shows:
+The largest group halved, but 8,835 rows is still **26% of the active
+corpus**, so the decision below stands. Re-measure once more before
+implementing: the location-parsing fix shipped the same day changes
+`location`, which is part of the development key, so these figures will
+move again on the next full crawl.
 
-| source | collapsible groups | rows removed | biggest |
-|---|---|---|---|
-| BuyRentKenya | 228 | **3,807** | 259 |
-| Property24 | 36 | 80 | 12 |
+The wider lesson is worth keeping. Two of this ADR's motivating examples
+were removed by the source site within a week of being measured. Numbers
+taken from a live scraped corpus decay, and any figure quoted publicly —
+in ad copy, on the homepage, on a CV — needs a date attached and a re-check
+before it is repeated.
 
-Grouping on exact `image_phash` + category + beds + price. P24's figure is
-small precisely because `cluster_key` already does this job there.
+## Investigated and rejected: collapsing on the shared image instead
 
-This matters for sequencing. An intra-source hash pass is **higher
-confidence and cheaper** than the development key: exact image equality
-plus agreeing price and bed count is close to conclusive, it reuses the
-blocking and scoring machinery already measured at ~96%, and it needs no
-new rule. It removes fewer rows (3,807 against 10,212) but it removes the
-ones most visible on the landing pages.
+The Kilimani 1-bed landing page shows the same rendered interior repeated
+down the grid, which looked at first like a cheaper fix than this ADR —
+merge on the perceptual hash and be done.
 
-**Do the intra-BRK pass first, then re-measure this ADR's collapse.** The
-two cuts overlap but neither contains the other — the hash pass catches
-identical photos under different headlines, the development key catches
-identical text under different photos. How much of the 10,212 survives the
-hash pass is unknown and should be measured, not assumed, before the
-union-find refactor below is attempted.
+The shape is real. Those 223 listings are all BuyRentKenya, every one with
+a distinct `image_url` and therefore a distinct `cluster_key`, but only
+**6 distinct phashes**, two of which cover 174 listings. Grouping active
+listings on `image_phash` + category + beds + price suggested 3,807
+collapsible rows on BRK against 80 on P24.
+
+**The asymmetry is not a missing feature.** Step 1.5 already matches
+intra-source pairs on both sources. It groups each candidate by
+`cluster_key` and skips any image spanning more than `CK_GROUP_CAP = 15`
+distinct keys, on the reasoning that one image across many keys is a stock
+or agency placeholder rather than one flat listed a few times. BRK gives
+every listing its own `image_url`, so its cluster_keys never collapse and
+these candidates blow past the cap. P24 reuses image URLs, so its keys
+collapse and stay under it.
+
+**And the guard is right.** Checking the three biggest hashes across the
+whole corpus rather than inside one filtered page:
+
+| phash | listings | suburbs | prices | bed counts | price range |
+|---|---|---|---|---|---|
+| `8c0633ccee316e3d` | 298 | 4 | 5 | 3 | 3.0M – 15.5M |
+| `bbc6d8e432314e39` | 149 | 4 | 5 | 3 | 3.0M – 9.0M |
+| `d8a543b43ce32778` | 140 | 2 | 3 | 2 | 3.0M – 6.0M |
+
+One image spanning four suburbs, three bed counts and a five-fold price
+range is an agency's generic render, not a photograph of a building.
+Merging on it would weld unrelated flats together — precisely what
+`CK_GROUP_CAP` prevents. The 3,807 figure is not a safe collapse, and the
+claim that the hash route is "higher confidence" than the text key was
+wrong.
+
+This is the **third** time this project has mistaken a shared render for a
+signal: `hide_generic_images` blanked 11% of properties and was disabled
+after the groups turned out to be coherent developments; `CK_GROUP_CAP`
+exists because a shared logo welded unrelated properties; and now this.
+The recurring lesson is that **an image shared across many listings is
+evidence of an agency's publishing habits, not of the building** — which
+is the same conclusion this ADR reaches from the other direction when it
+removes image similarity from the safeguard.
+
+So the development key stands as written. No image-based shortcut replaces
+it.
 
 ## Open: where this runs in the pipeline
 

@@ -18,9 +18,28 @@ name: Scheduled refresh
 # Run workflow); manual runs are FULL unless you set dedup=false.
 
 on:
-  schedule:
-    - cron: "0 1 * * 0,2,4,6"   # Sun/Tue/Thu/Sat 01:00 UTC — LIGHT
-    - cron: "0 2 * * 1,3,5"     # Mon/Wed/Fri 02:00 UTC — FULL (dedup)
+  # ── SCHEDULES DISABLED 2026-09-02 ──────────────────────────────────
+  # BuyRentKenya moved behind Cloudflare in its 1 Sep re-platform and now
+  # returns 403 to GitHub's runners. Property24 has blocked datacenter IPs
+  # since July. Neither source can be scraped from hosted runners, so every
+  # scheduled run failed with "no listings saved" — a daily false alarm.
+  #
+  # That noise is the actual danger. The dead-parser check emailed on 29,
+  # 30, 31 Aug and 1 Sep about a genuinely broken parser, and those mails
+  # went unread. An alert that cries wolf daily stops being an alert.
+  #
+  # Scraping is manual until then — see docs/weekly-rhythm.md. Re-enable by
+  # uncommenting, once either:
+  #   (a) a self-hosted runner on a residential IP is registered (note the
+  #       public-repo caveat: only schedule/workflow_dispatch triggers, and
+  #       require approval for external contributors), or
+  #   (b) build-then-swap lands in persist_dedup, making an unattended
+  #       dedup-only schedule safe. Today a crash mid-rebuild empties the
+  #       site — it has done, twice.
+  #
+  # schedule:
+  #   - cron: "0 1 * * 0,2,4,6"   # Sun/Tue/Thu/Sat 01:00 UTC — LIGHT
+  #   - cron: "0 2 * * 1,3,5"     # Mon/Wed/Fri 02:00 UTC — FULL (dedup)
   workflow_dispatch:
     inputs:
       max_pages:
