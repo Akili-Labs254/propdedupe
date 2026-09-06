@@ -179,13 +179,30 @@ def _clean_location(value: Optional[str]) -> Optional[str]:
     return candidate
 
 
+# "4-bedroom-townhouse-for-sale-buruburu-3672030"
+#                          ^^^^^^^^^ everything after this is the area
+SLUG_INTENT_RE = re.compile(r"-for-(?:sale|rent)-", re.I)
+
+
 def _location_from_slug(slug: str) -> Optional[str]:
-    """Last-resort area name: '...-for-sale-buruburu-3672030' -> 'Buruburu'."""
-    parts = SLUG_ID_RE.sub("", slug).split("-")
-    if not parts:
+    """Area name from the URL slug — the most durable field on the page.
+
+    Takes everything between the for-sale/for-rent marker and the trailing
+    listing id, NOT just the last token: areas are frequently two words
+    ("westlands-area", "general-mathenge", "kiambu-road") and taking the
+    tail alone yields "Area", "Mathenge", "Road".
+    """
+    if not slug:
         return None
-    tail = parts[-1]
-    return tail.replace("_", " ").title() if tail else None
+    without_id = SLUG_ID_RE.sub("", slug)
+    parts = SLUG_INTENT_RE.split(without_id, maxsplit=1)
+    tail = parts[1] if len(parts) > 1 else ""
+    if not tail:
+        return None
+    words = [w for w in tail.replace("_", "-").split("-") if w]
+    if not words:
+        return None
+    return " ".join(w.capitalize() for w in words)
 
 
 def parse_title(title : str) -> Tuple[Optional[int], Optional[str]]:
