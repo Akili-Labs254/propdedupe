@@ -24,7 +24,8 @@ from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 from backend.db.client import get_client
 from backend.dedup.adjacency import ADJACENCY
 from backend.web.routes import (  # shared env + filters + sort options
-    DEFAULT_SORT, SORTS, suburb_from_slug, suburb_slug, templates,
+    DEFAULT_SORT, SORTS, apply_sale_price_floor, suburb_from_slug,
+    suburb_slug, templates,
 )
 
 router = APIRouter(include_in_schema=False)
@@ -142,6 +143,8 @@ def fetch_properties(db, suburb: str, category: str,
          .eq("suburb", suburb))
     if bedrooms is not None:
         q = q.eq("bedrooms", bedrooms)
+
+    q = apply_sale_price_floor(q, category)
 
     sort_col, sort_desc = SORTS.get(sort, SORTS[DEFAULT_SORT])
     if sort_col == "price":

@@ -157,6 +157,67 @@ SORTS = {
 DEFAULT_SORT = "newest"
 
 
+# ── Mislisted rentals on sale pages ────────────────────────────────────
+#
+# Agents post rentals under "For Sale" and the portals publish them as
+# submitted. A monthly rent is ~100x smaller than a sale price, so every
+# one of these sorts to the TOP of a cheapest-first sale page — the first
+# thing a buyer sees, and where every paid click lands.
+#
+# Verified on Property24, 2026-09-07: "5 Bedroom House for Sale in
+# Lavington", KSh 500 000, description "Huge house for rent in lavinton".
+# P24 genuinely categorises it for-sale because that is how it was
+# submitted. Our data is faithful; the source is wrong.
+#
+# Measured on the 7 Sep corpus (13,859 active sale properties):
+#   - 17 rows priced 500,000-1,290,000, ALL 4-6 bed, in Karen, Runda,
+#     Muthaiga, Nyari, Lavington, Kitisuru, Thigiri and Loresho. Two say
+#     "for rent" in their own titles.
+#   - the cheapest GENUINE sale is a 1.75M studio in Garden Estate.
+# Nothing sits between 1.29M and 1.75M, so the boundary is unambiguous.
+#
+# Per-bedroom 5th percentiles, for scale: 1-bed 3M, 2-bed 6M, 3-bed 9M,
+# 4-bed 13M, 5-bed 30M, 6-bed 35M. The suppressed rows are 26-60x below
+# the 5th percentile for their own bed count.
+SALE_PRICE_FLOOR = 1_500_000          # nothing legitimate below this
+SALE_FLOOR_LARGE_HOME = 3_000_000     # ...and 4+ beds cannot be this cheap
+SALE_FLOOR_LARGE_BEDS = 4
+
+# 3M, not 5M. The mislisted rentals top out at 1,290,000, so 3M keeps a
+# 2.3x margin over the worst of them while sparing a real listing that 5M
+# caught: "Modern Studio, 1, 2, 3 & 4 Bedroom Apartments" in Kilimani at
+# KSh 4,600,000.
+#
+# That row is a shape worth knowing about. A development advertising a
+# RANGE of unit types gets price = the entry (studio) price and bedrooms =
+# the largest unit named in the title, so it reads "4 bed at 4.6M" and
+# looks impossible. The listing is genuine; the two fields just describe
+# different units. Any threshold on price-per-bedroom will keep meeting
+# these, and the fix is eventually to record a price range for
+# multi-unit listings rather than to keep tuning floors.
+
+
+def apply_sale_price_floor(q, category: str):
+    """Hide sale rows whose price is implausible for a sale.
+
+    NOT a data mutation. `category` is what the source told us, and we have
+    no evidence it is wrong — only that the price is implausible for it.
+    Same stance as ADR 0010: suppress at display time, leave the row
+    intact, and keep the property page resolving for direct links.
+
+    Rent is untouched. 500,000/month is an ordinary Nairobi rent, which is
+    exactly why these rows are invisible until they reach a sale page.
+    """
+    if category != "sale":
+        return q
+    return q.or_(
+        f"price.is.null,"
+        f"and(price.gte.{SALE_PRICE_FLOOR},bedrooms.lt.{SALE_FLOOR_LARGE_BEDS}),"
+        f"and(price.gte.{SALE_FLOOR_LARGE_HOME},bedrooms.gte.{SALE_FLOOR_LARGE_BEDS}),"
+        f"and(price.gte.{SALE_PRICE_FLOOR},bedrooms.is.null)"
+    )
+
+
 @router.get("/")
 def home(
     request: Request,
@@ -197,6 +258,11 @@ def home(
         q = q.lte("price", max_price)
 
     offset = (page - 1) * PER_PAGE
+    # Mislisted rentals (agents posting a monthly rent under "For Sale")
+    # are ~100x below a real sale price, so they fill page 1 of a
+    # cheapest-first sale page. See segments.apply_sale_price_floor.
+    q = apply_sale_price_floor(q, category)
+
     sort_col, sort_desc = SORTS[sort]
     if sort_col == "price":
         # POA rows (price IS NULL) sort to the top of an ascending list in
