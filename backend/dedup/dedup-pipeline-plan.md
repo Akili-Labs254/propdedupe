@@ -1,6 +1,6 @@
 # PropDeDupe — Dedup Pipeline: Plan, Testing & Iteration Log
 
-*Living document. Filled in stage by stage as the pipeline is designed, built, and tested — not written upfront and then coded to match.*
+*Working log from the initial build (July 2026), kept as written. Numbers are from the first ~13.5k-listing corpus, not the current one. Later changes are in `docs/decisions/`.*
 
 ---
 
@@ -114,7 +114,7 @@ Location gate applied post-scoring: location >= 0.5 forces at least review tier.
 ## 4. Baseline validation
 
 **First quantified Stage 1 result (12,321 P24 listings).**
-Grouping key `image_url + bedrooms + baths + size_sqm + price` (no location): **4,427 of 12,321 listings collapse as redundant (~36% bloat)** → ~7,894 distinct products. This is the first hard dedup number, defensible for README/interview ("P24's Nairobi house listings are ~36% redundant; PropDeDupe collapses them to ~7,900 distinct products").
+Grouping key `image_url + bedrooms + baths + size_sqm + price` (no location): **4,427 of 12,321 listings collapse as redundant (~36% bloat)** → ~7,894 distinct products. This was the first hard dedup number.
 
 **Validation finding — location must NOT be in the grouping key.** Adding `location` to the key *reduced* collapse from 4,427 to 4,266 — meaning ~161 genuine duplicates got split apart because the same physical house is listed under multiple suburbs (Westlands / Loresho / Mountain View). This is direct empirical confirmation of standing rule #8 ("location is a dedup score, never a blocking key"). The correct number is the location-free 4,427.
 
@@ -194,5 +194,5 @@ SSIM compares images at full resolution. Too expensive for blocking (~7M pairs),
 ### 6b. Embedding-based matching (future — when same-house-different-photo cases emerge)
 Neural embeddings (e.g. CLIP) enable matching even when agents use completely different photos. Beyond what perceptual hashing can do. Trigger: confirmed same-house-different-photo cases. Worth mentioning in README as designed upgrade path.
 
-### 6c. Learned model (future — post-placement)
+### 6c. Learned model (future)
 Hand-verified pairs provide labeled training data. Small classifier could learn optimal weights from data. Only if heuristic scorer plateaus. The heuristic scorer remains the baseline to beat.

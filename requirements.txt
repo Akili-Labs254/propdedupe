@@ -11,8 +11,3 @@ jinja2
 python-multipart   # form posts (admin review UI)
 pytest             # tests/
 httpx              # FastAPI TestClient
-
-# ── Planned (uncomment as we reach each stage) ──────────────────────────
-# rapidfuzz            # text similarity for matching titles
-# psycopg2-binary      # alternative: direct Postgres access
-# pytest               # when the first real tests are written

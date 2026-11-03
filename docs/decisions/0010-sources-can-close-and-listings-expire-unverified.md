@@ -100,7 +100,7 @@ the site should say so rather than averaging it into a single claim.
 - **Two sources was always fragile.** Either could do this; one did, with
   sixteen hours' notice and no warning. A third and fourth source is now a
   structural requirement rather than a growth idea.
-- **The CV story is unaffected.** The engine was built, measured at ~96%
+- **The measured results still stand.** The engine was built, measured at ~96%
   auto-merge precision, and ran across two sources on real data. A source
   changing its terms afterwards does not undo that.
 

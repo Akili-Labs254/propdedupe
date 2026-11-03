@@ -11,6 +11,9 @@ env/
 
 # ── Secrets & local config ──
 .env
+.env.*
+!.env.example
+render.yaml
 
 # ── Scraped data & local scratch (keep the folder, ignore its contents) ──
 data/*
@@ -25,5 +28,9 @@ logs/*
 .idea/
 .DS_Store
 Thumbs.db
+
+# ── Private: personal notes and marketing drafts (never public) ──
+notes/
 gtm/
-render.yaml
+*tiktok*.md
+x-link-post-*.md

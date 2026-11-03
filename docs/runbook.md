@@ -3,29 +3,53 @@
 Operational reference: how to run everything, and what the failures
 we've actually hit mean. Update this when something new bites.
 
-## Scheduled refresh (GitHub Actions)
+## Refreshing data (manual)
 
-`.github/workflows/refresh.yml` runs the full cycle daily at 01:00 UTC.
-- Secrets (repo Settings → Secrets and variables → Actions):
-  `SUPABASE_URL`, `SUPABASE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`.
-- The cron only fires from the DEFAULT branch; until dev merges to
-  main, trigger manually: Actions tab → Scheduled refresh → Run
-  workflow (optionally set max_pages=2 as a smoke test).
-- Alerting: GitHub emails the repo owner on failure. A source saving
-  ZERO listings exits non-zero on purpose (dead parser / blocked IP).
-- P24 BLOCKS GitHub's datacenter IPs (sustained 503s even with backoff,
-  tested 2026-07-17), so CI runs `--sources brk`. P24 is scraped from a
-  residential IP every 2-3 days:
-  `caffeinate -i python -u -m scripts.refresh --all --sources p24 --rent-max-pages 1500`
-  (cap 500→1500 on 2026-07-18; raise further / upgrade Supabase tier
-  when DB disk crosses ~70%)
-  The stale guard auto-skips whichever source a run didn't scrape.
+Both sources block datacenter IPs (Property24 since July, BuyRentKenya
+since 2 Sep, see ADR 0010), so nothing scrapes from CI. The schedules in
+`.github/workflows/refresh.yml` are commented out and scraping runs from a
+laptop on a home connection.
+
+1. Scrape, hash and stale-check. Overnight; keep the lid open.
+
+   ```bash
+   set -o pipefail
+   LOG=logs/refresh-$(date +%Y%m%d-%H%M).log
+   caffeinate -is python -u -m scripts.refresh --scrape --hashes --stale \
+       --sources p24 --rent-max-pages 1500 2>&1 | tee "$LOG"
+   echo "exit=$? finished $(date)" | tee -a "$LOG"
+   ```
+
+   `-is`, not `-i`: `-s` also blocks system sleep while on mains power.
+   A dropped connection kills the hash stage (happened on 30 Sep).
+   Deliberately not `--all`, so the site doesn't change while nobody is
+   watching.
+
+2. Check the log before going further:
+
+   ```bash
+   grep -E "exit=|SKIPPING|complete=|403|Forbidden|→ stale" logs/refresh-*.log | tail -30
+   ```
+
+   Also check the price fill rate for listings seen today. P24 prices
+   once went NULL for eleven days without anything failing.
+
+3. Only if that looks sane, rebuild (watch it; property pages 404 for
+   the ~90 minutes it runs, see "Known gaps" below):
+
+   ```bash
+   python -u -m scripts.persist_dedup 2>&1 | tee logs/rebuild-$(date +%Y%m%d-%H%M).log
+   ```
+
+If a run dies after scraping, resume with `--hashes`, then
+`--stale --stale-cutoff "<'Run started' line from that log>"`. Never a
+bare `--stale` (see below).
 
 ## Regular operations
 
 ```bash
-# Full refresh cycle (scrape → hashes → stale → dedup). Hours.
-caffeinate -i python -u -m scripts.refresh --all 2>&1 | tee data/refresh.log
+# Full cycle in one go (scrape → hashes → stale → dedup). Hours.
+caffeinate -is python -u -m scripts.refresh --all --sources p24 2>&1 | tee logs/refresh.log
 
 # Read-only preflight / post-run sanity
 python -m scripts.refresh --check
@@ -34,7 +58,7 @@ python -m scripts.refresh --check
 python -m scripts.refresh --scrape --max-pages 3
 
 # Dedup rebuild only (re-runnable, clears + rebuilds matches/properties)
-caffeinate -i python -u -m scripts.persist_dedup 2>&1 | tee data/persist.log
+caffeinate -is python -u -m scripts.persist_dedup 2>&1 | tee logs/persist.log
 
 # Resume a rebuild that died during singletons
 python -m scripts.persist_dedup --singletons-only
@@ -93,8 +117,7 @@ key (`urllib.parse.quote`) if it has special characters.
 
 **Silent rebuild failure** — a crashed persist run leaves the site
 serving stale or zero properties with no obvious symptom. Always check
-the log tail + `--check` after a run. (The scheduler, when built, must
-alert on non-zero exit — a run died silently once already.)
+the log tail + `--check` after a run.
 
 **Scrape looks broken (0 listings/page)** — site markup changed. Parser
 fix required; the stale-pass guard (<50% of active count) protects the
@@ -124,3 +147,12 @@ everything scraped before it. Pass the original run's timestamp:
   build.
 - price NULL for POA, never 0.
 - Intra auto-merge cut (0.10) changes only with a new audit (ADR 0005).
+
+## Known gaps
+- `persist_dedup` clears before it rebuilds, so the site serves nothing
+  while it runs and stays empty if it crashes. Build-then-swap would fix
+  this; not done yet.
+- No per-field fill-rate check after a scrape. A parser that half-breaks
+  (prices NULL, location swallowing headline text) currently only shows
+  up when someone looks at the site.
+- ADR 0009 (collapse development listings) is decided but not built.

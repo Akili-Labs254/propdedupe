@@ -1,92 +1,124 @@
 # PropDeDupe
 
-Property listing deduplication engine for the Nairobi real estate market.
+A deduplication engine for Nairobi property listings. It runs
+[fikia.co.ke](https://www.fikia.co.ke), a search site that shows each
+property once instead of once per advert.
 
-## Why this exists
+## Why
 
-Nairobi's property market is split across multiple listing sites
-(BuyRentKenya, Property24, among others) and they're full of duplicates.
-The same house shows up 3-7 times on Property24 alone, sometimes under
-different suburbs. If you're actually trying to find a house — like my
-stepdad was — you end up scrolling through the same listings over and over
-across multiple sites, with no way to tell what's genuinely new.
+Nairobi listings are spread across a few portals (BuyRentKenya,
+Property24 and others) and they're full of repeats. The same house gets
+posted again and again, by different agents, sometimes under different
+suburbs. When my stepdad was house hunting he was scrolling through the
+same places over and over with no way to tell what was actually new.
 
-I wanted to build something that pulls listings from multiple sources,
-figures out which ones are the same property, and collapses them down to
-one clean result per actual house. At its core this is an entity resolution
-problem — turning many noisy records into one canonical entity per
-real-world property.
+So I wanted to see if I could pull listings from more than one site,
+work out which adverts are the same property, and show one result per
+property.
 
-## What it does
+## Numbers
 
-Scrapes about 13,500 listings at initial scrape (July 2026) from two Nairobi property sites and
-deduplicates them down to roughly 8,950 distinct properties — **about 34%
-were duplicates.**
+From the last full crawl (6 September 2026):
 
-The dedup pipeline works in layers:
+- **57,744** live adverts become **35,791** distinct results
+- **718** properties were found on both portals
+- 151 tests
 
-- **Intra-source (Property24):** groups identical listings using a composite
-  key (image URL + bedrooms + baths + size + price). This catches the bulk
-  of P24's re-listed bloat — developments posting the same unit type 10-50
-  times, same house posted by multiple agents and agencies.
+Not all of that gap is "duplicates". Some of it is the same advert posted
+many times, and some is a development advertising every identical unit
+separately, which shows as one result on purpose. ADR 0009 goes into it.
 
-- **Cross-source (BRK ↔ P24):** matches listings across sites using
-  perceptual image hashing (triple-hash with 2-of-3 agreement to handle
-  P24's watermarks and different croppings across the sites), then scores
-  pairs on price similarity, bedroom/bath counts, and suburb proximity via
-  a hand-built adjacency map of 78 Nairobi suburbs.
+## How it works
 
-Pairs are sorted into three tiers: **auto-merge** (high confidence,
-verified 96% precision), **review queue** (needs a human look), and
-**distinct**.
+1. **Scrape.** One scraper per site (Property24 is HTML, BuyRentKenya was
+   JSON-LD). Both produce the same `ScrapedListing` shape, so nothing
+   downstream cares where a listing came from. Upserts are keyed on
+   `(source, source_listing_id)`.
+2. **Hash images.** Three perceptual hashes per cover photo (phash, ahash,
+   whash). Watermarks throw individual hashes off in different ways, so a
+   pair needs 2 of the 3 to agree.
+3. **Match within a site.** Exact re-posts share a `cluster_key` (image URL
+   + beds + baths + size + price). Re-uploaded photos are caught by hash
+   distance.
+4. **Match across sites.** Hash blocking cuts millions of possible pairs
+   down to the ones worth scoring, then each pair is scored on image,
+   price, beds, baths and location. Location uses a hand-built map of
+   Nairobi suburbs and which ones border each other, because the same
+   house often gets listed under a neighbouring suburb.
+5. **Tiers.** Every pair ends up as auto-merge, review or distinct. No
+   single field can veto a match, but a far-apart location or a different
+   bed count blocks auto-merge. A hand check in July found about 96% of
+   auto-merges were correct.
+6. **Group.** Union-find turns matched pairs into properties. The
+   properties table is rebuilt every run, so URLs (slugs) are tied to
+   listings rather than property ids, and old slugs 301 to new ones.
+7. **Serve.** FastAPI with server-rendered Jinja pages. Suburb and bedroom
+   pages are generated from the data for search engines. Every result
+   links out to the original advert. Images are never rehosted.
 
-## Live API
+## Things that went wrong
 
-Deployed at **https://propdedupe.onrender.com**
+Most of what I learnt came from these:
 
-Try these:
+- **BuyRentKenya blocked the scraper** on 2 September after a re-platform.
+  Getting around it would mean faking browser fingerprints, and I decided
+  not to. Those listings are frozen as of that date (ADR 0010).
+- **A source marked as stale when it wasn't scraped.** When CI only
+  scraped one site, the stale check ran on both and marked all 42k
+  Property24 listings stale. Fixed by skipping any source that wasn't
+  crawled in that run.
+- **Supabase's 60 second gateway limit.** Big single UPDATE/DELETE requests
+  just timed out, and retrying made it worse (lock conflicts). Every bulk
+  write is now done in batches of 1,000 rows.
+- **Silent parser breakage.** Property24 changed its markup and prices came
+  back NULL for eleven days without anything failing. I only noticed
+  because a page looked empty.
 
-- [`/stats`](https://propdedupe.onrender.com/stats) — headline dedup numbers
-- [`/properties?per_page=5`](https://propdedupe.onrender.com/properties?per_page=5) — browse deduplicated properties
-- [`/properties?location=karen&bedrooms=4`](https://propdedupe.onrender.com/properties?location=karen&bedrooms=4) — filtered search
-- [`/review?per_page=3`](https://propdedupe.onrender.com/review?per_page=3) — review queue with side-by-side listing pairs and signal breakdowns
+## Current state
 
-## Project structure
+- Both portals block datacenter IPs, so scraping runs by hand from a home
+  connection rather than on a schedule. See `docs/runbook.md`.
+- The rebuild clears tables before refilling them, so the site is empty
+  while it runs. Building into new tables and swapping is next.
+- A check on per-field fill rates after each scrape would have caught the
+  NULL prices. Also not built yet.
+
+## Stack
+
+Python 3.9, requests + BeautifulSoup, imagehash, FastAPI, Jinja2,
+PostgreSQL on Supabase, hosted on Render.
 
 ```
-propdedupe/
-├── backend/
-│   ├── scraper/   # per-source scrapers (JSON-LD for BRK, HTML for P24)
-│   ├── dedup/     # scorer, adjacency map, image matching
-│   ├── api/       # FastAPI endpoints
-│   ├── db/        # schema, client, save utilities
-│   └── common/    # config
-├── scripts/       # scraping, backfill, dedup pipeline runners
-├── docs/          # pipeline plan, decision log
-└── data/          # local scratch (gitignored)
+backend/
+  scraper/   one module per site
+  dedup/     scorer, suburb adjacency map, slugs, development grouping
+  db/        schema + SQL migrations, Supabase client, upserts
+  web/       site routes, SEO pages, admin review queue
+  api/       FastAPI app + JSON endpoints
+scripts/     refresh pipeline, dedup rebuild, backfills
+tests/
+docs/
+  decisions/ architecture decision records (ADRs)
+  runbook.md how to run it and what has broken before
 ```
 
-## How to run locally
+## Running it locally
 
 ```bash
 git clone https://github.com/Akili-Labs254/propdedupe.git
 cd propdedupe
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-# add SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ADMIN_API_KEY to .env
+cp .env.example .env   # then fill in your own Supabase project's values
 uvicorn backend.api.main:app --reload --port 8000
+python -m pytest
 ```
 
-## Responsible scraping
+There's also a JSON API: `/properties` (with filters) and Swagger docs at
+`/docs`.
 
-This project scrapes only publicly listed property data, identifies itself
-honestly via User-Agent, rate-limits requests with random delays, and backs
-off on errors. No images are rehosted — only URLs and perceptual hashes are
-stored.
+## Scraping politely
 
-## What I'd do next
-
-- Visual review page for the review queue (merge/dismiss with side-by-side images)
-- Compare a learned model against the hand-tuned heuristic baseline
-- Add more sources (Facebook groups, smaller listing sites)
-- Consumer-facing search frontend
+Only publicly listed data. The scraper identifies itself with a real
+contact address, waits 5 seconds between requests, backs off on errors,
+and stores image URLs and hashes rather than copies of the images.

@@ -169,8 +169,8 @@ The figures below assume the threshold of 4.
   "duplicates removed": a 234-unit development collapsing to one row is not
   233 repeated adverts. The honest form is **"54,000 adverts become 21,800
   distinct results"**, with same-advert duplication quoted separately where
-  a specific number is needed. Fix this in the CV, the homepage and any ad
-  copy at the same time as the rebuild — it is currently understated, which
+  a specific number is needed. Fix this on the homepage and anywhere else
+  the figure is quoted, at the same time as the rebuild — it is currently understated, which
   is the safe direction, but it is wrong either way.
 - **Reversible.** This is a grouping rule re-derived from listings on every
   rebuild, not a durable human decision of the kind ADR 0007 protects.
@@ -216,7 +216,7 @@ move again on the next full crawl.
 The wider lesson is worth keeping. Two of this ADR's motivating examples
 were removed by the source site within a week of being measured. Numbers
 taken from a live scraped corpus decay, and any figure quoted publicly —
-in ad copy, on the homepage, on a CV — needs a date attached and a re-check
+on the homepage or anywhere else — needs a date attached and a re-check
 before it is repeated.
 
 ## Investigated and rejected: collapsing on the shared image instead

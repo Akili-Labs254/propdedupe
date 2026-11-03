@@ -28,7 +28,7 @@ on:
   # 30, 31 Aug and 1 Sep about a genuinely broken parser, and those mails
   # went unread. An alert that cries wolf daily stops being an alert.
   #
-  # Scraping is manual until then — see docs/weekly-rhythm.md. Re-enable by
+  # Scraping is manual until then — see docs/runbook.md. Re-enable by
   # uncommenting, once either:
   #   (a) a self-hosted runner on a residential IP is registered (note the
   #       public-repo caveat: only schedule/workflow_dispatch triggers, and
