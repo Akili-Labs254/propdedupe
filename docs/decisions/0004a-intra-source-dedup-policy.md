@@ -1,4 +1,4 @@
-# 0004 — Intra-source dedup: thresholds set by measured precision
+# 0004a: Intra-source dedup thresholds, set by measured precision
 
 **Status:** accepted (Phase 1, July 2026)
 
@@ -16,7 +16,7 @@ blocking never sees them because both listings are on the same site.
    is empty intra-source. Distance histogram confirmed: 89% of
    candidates at distance 0, thin tail to 4.
 2. **Same weighted scorer, no new rules** (evidence-weighted scoring,
-   no single-field veto — standing rule).
+   no single-field veto: standing rule).
 3. **Auto-merge threshold set by a hand audit, not intuition.**
    First run capped everything at review tier; ~70 pairs were then
    hand-classified via the admin review UI (2026-07-15):
@@ -37,7 +37,7 @@ blocking never sees them because both listings are on the same site.
   stays on: all audited false positives carried loc 0.5.
 
 ## Notes
-- The feared failure mode — development sibling units sharing renders —
+- The feared failure mode, development sibling units sharing renders,
   did not appear in the low band; spec disagreement already tiers those
   `distinct`.
 - The audit surfaced a data bug: hashes weren't invalidated when a

@@ -2,10 +2,10 @@
 Persist dedup pipeline results to the database.
 
 Runs the same blocking + scoring pipeline as run_scorer.py, then:
-  Step 1: Cross-source — scores pairs, inserts matches, groups auto-merge
+  Step 1 (cross-source): scores pairs, inserts matches, groups auto-merge
           pairs via Union-Find into properties, links member listings.
-  Step 2: Intra-P24 — collapses cluster_key duplicate groups into properties.
-  Step 3: Singletons — every still-unlinked listing becomes its own property
+  Step 2 (intra-P24): collapses cluster_key duplicate groups into properties.
+  Step 3 (singletons): every still-unlinked listing becomes its own property
           (previously manual SQL, now automated below).
 
 Run: caffeinate -i python -u -m scripts.persist_dedup 2>&1 | tee data/persist_dedup.log
@@ -51,7 +51,7 @@ def fetch_listing_details(db, ids: List[int]) -> Dict[int, dict]:
 
 # ── Union-Find ──────────────────────────────────────────────────────
 # Groups listing IDs into connected components. If A matches B and
-# B matches C, all three end up in one group — one property.
+# B matches C, all three end up in one group: one property.
 #
 # HOW IT WORKS: each ID starts as its own "parent." When two IDs are
 # linked (union), one becomes the parent of the other. find() walks
@@ -125,7 +125,7 @@ def _group_by_cluster_key(ids: List[int], details: Dict[int, dict]
     """Split listing ids into groups that are identical on cluster_key.
 
     Listings sharing a cluster_key match on image_url + beds + baths +
-    size + price, so any member represents the group — which is what lets
+    size + price, so any member represents the group, which is what lets
     us score one pair per variant instead of one pair per listing.
 
     Rows with a falsy cluster_key each become their own group: we know
@@ -141,7 +141,7 @@ def _group_by_cluster_key(ids: List[int], details: Dict[int, dict]
     return list(groups.values())
 
 
-CLEAR_CHUNK = 1000  # rows per clear request — small enough that even on a
+CLEAR_CHUNK = 1000  # rows per clear request: small enough that even on a
                     # throttled free-tier box each request finishes well
                     # under Supabase's ~60s API-gateway upstream timeout.
 
@@ -150,7 +150,7 @@ def _unlink_listings_chunked(db):
     """NULL property_id on linked listings, one id-batch at a time.
 
     A single full-table UPDATE (~48k rows) runs past the API gateway's
-    ~60s upstream limit on the free tier and 504s — no client timeout
+    ~60s upstream limit on the free tier and 504s: no client timeout
     helps, the gateway kills it. Batching keeps every request small and
     fast. Each pass grabs the next `CLEAR_CHUNK` still-linked ids; the
     filter shrinks as we null them, so we always fetch fresh rows.
@@ -171,7 +171,7 @@ def _unlink_listings_chunked(db):
 
 def _clear_table_chunked(db, table):
     """Delete every row from `table` in id-batches (same 60s-gateway
-    reason as _unlink_listings_chunked — a full-table DELETE 504s)."""
+    reason as _unlink_listings_chunked: a full-table DELETE 504s)."""
     total = 0
     while True:
         rows = _with_retry(lambda: db.table(table).select("id")
@@ -189,7 +189,7 @@ def clear_previous_results(db):
     """Remove previous dedup results so the script is re-runnable.
 
     Order matters: unlink listings (clear the FK) BEFORE deleting the
-    properties they point to. All three are chunked — a single bulk
+    properties they point to. All three are chunked: a single bulk
     UPDATE/DELETE on the whole table exceeds Supabase's ~60s API-gateway
     upstream timeout on the free tier and 504s.
     """
@@ -202,7 +202,7 @@ def clear_previous_results(db):
 
 def snapshot_slug_state(db) -> Dict[int, str]:
     """Capture {listing_id: current slug} BEFORE the rebuild clears
-    everything — this is what lets slugs survive the rebuild."""
+    everything: this is what lets slugs survive the rebuild."""
     pid_to_slug = {}
     offset = 0
     while True:
@@ -238,7 +238,7 @@ def snapshot_slug_state(db) -> Dict[int, str]:
 
 
 def persist_slug_snapshot(db, snapshot: Dict[int, str]):
-    """Write the snapshot to the slug_snapshot table BEFORE clearing —
+    """Write the snapshot to the slug_snapshot table BEFORE clearing:
     a crash between clear and rebuild must not lose slug inheritance."""
     _with_retry(lambda: db.table("slug_snapshot")
                 .delete().gt("listing_id", 0).execute())
@@ -251,7 +251,7 @@ def persist_slug_snapshot(db, snapshot: Dict[int, str]):
 
 
 # A rebuild that dies partway leaves a partial properties table. Re-running
-# then snapshots THAT — and the old code overwrote the good crash-safe copy
+# then snapshots THAT, and the old code overwrote the good crash-safe copy
 # with the degraded one, because it only fell back when the live snapshot was
 # completely empty. 2026-08-03 that churned 26,346 public URLs.
 #
@@ -263,7 +263,7 @@ def persist_slug_snapshot(db, snapshot: Dict[int, str]):
 # while listings-with-a-slug only fell to 27,968 (ratio 0.513), because each
 # surviving cluster property still carries many members. A 0.5 threshold sits
 # just under the real incident and would not have caught it. Measured, not
-# guessed — see tests/test_persist.py.
+# guessed: see tests/test_persist.py.
 #
 # Erring toward refusing is cheap: a stale snapshot merely remembers slugs for
 # listings that may not exist, which SlugAllocator ignores. Erring toward
@@ -273,7 +273,7 @@ SNAPSHOT_SHRINK_GUARD = 0.7
 
 
 def stored_snapshot_size(db) -> int:
-    """Row count of the crash-safe copy — one request, not a full read."""
+    """Row count of the crash-safe copy: one request, not a full read."""
     res = _with_retry(lambda: db.table("slug_snapshot")
                       .select("listing_id", count="exact")
                       .limit(1).execute())
@@ -288,7 +288,7 @@ def resolve_slug_snapshot(live: Dict[int, str], stored_count: int,
     so the decision is testable without a database.
     """
     if not live:
-        # Nothing live at all — the pre-existing recovery path.
+        # Nothing live at all: the pre-existing recovery path.
         stored = load_stored() if stored_count else {}
         if stored:
             return stored, False, f"{len(stored)} slugs RECOVERED from crash-safe copy"
@@ -347,7 +347,7 @@ def earliest_first_seen(member_rows: List[dict]):
 
 
 def price_range(member_rows: List[dict]) -> dict:
-    """Min/max price across member listings — sources sometimes disagree
+    """Min/max price across member listings: sources sometimes disagree
     on price, and the range is information only an aggregator has."""
     prices = [float(r["price"]) for r in member_rows if r.get("price")]
     if not prices:
@@ -356,7 +356,7 @@ def price_range(member_rows: List[dict]) -> dict:
 
 
 def beds_baths_range(member_rows: List[dict]) -> dict:
-    """Min/max bed and bath counts across member listings — sources
+    """Min/max bed and bath counts across member listings: sources
     sometimes disagree (a DSQ / domestic-staff room counted or not), and
     the range is information only an aggregator has. Display only: search
     still filters on the property's primary bedrooms/bathrooms, same as
@@ -388,10 +388,10 @@ def _with_retry(make_call, attempts=4):
     backoff fixes it. make_call must BUILD AND EXECUTE the request
     (a lambda), so each retry issues a fresh request.
 
-    RETRY SAFETY — anything wrapped in this MUST be idempotent. A lost
+    RETRY SAFETY: anything wrapped in this MUST be idempotent. A lost
     response is not a lost write: the server can commit and then have
     the connection die before replying, so the retry re-sends a write
-    that already landed. 2026-08 that killed a rebuild 20 minutes in —
+    that already landed. In August 2026 that killed a rebuild 20 minutes in:
     a properties INSERT was retried and hit the unique index on the row
     its own first attempt had just created (23505 on slug). Property
     writes now use upsert(on_conflict="slug") so a replay is a no-op
@@ -399,7 +399,7 @@ def _with_retry(make_call, attempts=4):
 
     EVERY READ IN THIS FILE IS WRAPPED, added 2026-08-27. Reads are
     idempotent by definition, so none of the caution above applies to
-    them — and an unwrapped one is a live outage waiting to happen.
+    them, and an unwrapped one is a live outage waiting to happen.
     On 26 and 27 Aug the review_decisions fetch died on a dropped TLS
     handshake, twice, each time AFTER clear_previous_results had emptied
     properties and matches. The site served zero listings for 17 hours.
@@ -489,7 +489,7 @@ def create_singleton_properties(db, alloc: SlugAllocator,
 def main():
     db = get_client(timeout=600)  # bulk clears/writes run for minutes on free tier
 
-    # Snapshot slug state BEFORE clearing — rebuilt properties inherit
+    # Snapshot slug state BEFORE clearing: rebuilt properties inherit
     # the slugs their member listings carried (stable public URLs).
     print("Snapshotting slug state...")
     live = snapshot_slug_state(db)
@@ -789,7 +789,7 @@ def main():
         if d != "merge" or (a, b) in candidate_keys:
             continue
         # category is a HARD partition (standing rule) and blocking never
-        # produces a cross-category candidate — but this branch unions
+        # produces a cross-category candidate, but this branch unions
         # NON-candidates, so a single bad click in the review UI could
         # otherwise weld a rental onto a for-sale property permanently
         # (decisions are durable and reapplied every rebuild). Refuse it.
@@ -845,7 +845,7 @@ def main():
             **beds_baths_range(member_rows),
         }
         # Queue the property row rather than writing it now. This loop used
-        # to upsert one row per group — 4,143 sequential round-trips on the
+        # to upsert one row per group: 4,143 sequential round-trips on the
         # last run. Linking was already batched; the writes weren't.
         if prop_data["slug"] in step1_slug_members:
             print(f"  WARNING: duplicate slug {prop_data['slug']!r} across "
@@ -857,7 +857,7 @@ def main():
         if len(source_ids) > 1:
             step1_multi_source += 1
 
-    # Batch the writes, mapping ids back BY SLUG — upsert with ON CONFLICT
+    # Batch the writes, mapping ids back BY SLUG: upsert with ON CONFLICT
     # gives no ordering guarantee, and mis-pairing here would attach
     # listings to the wrong property.
     for i in range(0, len(step1_props), 100):
@@ -909,7 +909,7 @@ def main():
 
     print(f"  Fetched {len(all_p24)} P24 listings with cluster_key")
 
-    # Group by (cluster_key, category) in Python — the category part is
+    # Group by (cluster_key, category) in Python: the category part is
     # belt-and-braces (identical price across sale/rent is ~impossible,
     # but the partition rule is absolute)
     clusters = defaultdict(list)
@@ -923,8 +923,8 @@ def main():
     step2_linked = 0
     step2_joined = 0  # linked to existing cross-source property
 
-    # This step used to issue TWO sequential requests per cluster — one
-    # property upsert, one listing update — across ~4,500 clusters. That's
+    # This step used to issue TWO sequential requests per cluster (one
+    # property upsert, one listing update) across ~4,500 clusters. That's
     # ~9,000 round-trips against a throttled free-tier box, and it was most
     # of a one-hour rebuild (the singleton step, which batches, ran ~790
     # properties/minute while this crawled). Now: decide everything in
@@ -957,7 +957,7 @@ def main():
             # Two clusters claiming one slug would blow up the batched
             # upsert ("ON CONFLICT DO UPDATE command cannot affect row a
             # second time") and silently merge two properties if it didn't.
-            # SlugAllocator should make this impossible — shout, don't guess.
+            # SlugAllocator should make this impossible: shout, don't guess.
             print(f"  WARNING: duplicate slug {slug!r} across clusters — "
                   "skipping the second. SlugAllocator should prevent this.")
             continue

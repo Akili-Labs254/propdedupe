@@ -1,10 +1,10 @@
--- Bed/bath range per property (sources sometimes disagree — a DSQ /
+-- Bed/bath range per property (sources sometimes disagree: a DSQ /
 -- domestic-staff room gets counted or not, so "4 bed" vs "5 bed" for the
--- same house — and showing the range is aggregator-only information for
+-- same house, and showing the range is aggregator-only information for
 -- buyers). Display only: search still filters on the property's primary
 -- bedrooms/bathrooms, exactly like price_min/max vs price.
 -- Run ONCE in the Supabase SQL Editor AFTER the current rebuild finishes.
--- Idempotent — safe to re-run. persist_dedup writes these columns itself
+-- Idempotent: safe to re-run. persist_dedup writes these columns itself
 -- from now on; the UPDATE backfills the current build.
 
 alter table properties add column if not exists beds_min  integer;

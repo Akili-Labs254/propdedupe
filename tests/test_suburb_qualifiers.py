@@ -44,7 +44,7 @@ def test_both_source_formats_agree():
 
 
 def test_city_name_that_is_itself_a_suburb_survives():
-    """"Nairobi CBD" must not be stripped to nothing — qualifiers come off
+    """"Nairobi CBD" must not be stripped to nothing: qualifiers come off
     the end only, and never take the whole name."""
     assert normalize_suburb("Nairobi CBD") == "nairobi cbd"
     assert normalize_suburb("Nairobi Cbd, Nairobi") == "nairobi cbd"

@@ -81,11 +81,11 @@ templates.env.filters["baths_range"] = format_baths_range
 #
 # Suburb values are stored lowercase with spaces ("ngong road"), and the
 # segment URLs were originally built by dropping that value straight into
-# the path — which produced "/houses-for-sale/ngong road". Browsers
+# the path, which produced "/houses-for-sale/ngong road". Browsers
 # %20-encode it and it *works*, but Google indexed the space form (seen in
 # Search Console), the canonical tag emitted a raw space, and the URLs are
 # unshareable. Slug is the hyphen form; the resolver accepts both so the
-# already-indexed space URLs still resolve (and get 301'd — see segments).
+# already-indexed space URLs still resolve (and get 301'd: see segments).
 
 _SLUG_SEP = re.compile(r"[^a-z0-9]+")
 
@@ -116,7 +116,7 @@ def days_listed(first_seen) -> Optional[int]:
 
     Nobody else in this market shows it at all. Portals are paid by the
     agent, and an advert visibly sitting unsold for two months is bad for
-    the person paying — which is exactly why it is useful to a buyer.
+    the person paying, which is exactly why it is useful to a buyer.
     """
     if not first_seen:
         return None
@@ -135,7 +135,7 @@ templates.env.filters["days_listed"] = days_listed
 
 
 def _opt_int(value: Optional[str]) -> Optional[int]:
-    """HTML forms submit empty fields as '' — treat those (and junk)
+    """HTML forms submit empty fields as '': treat those (and junk)
     as 'no filter' instead of letting FastAPI 422 the whole request."""
     if value is None or value.strip() == "":
         return None
@@ -148,7 +148,7 @@ def _opt_int(value: Optional[str]) -> Optional[int]:
 # Sort key → (column, descending). "newest" stays the default: it is what
 # the site has always done, and price sorts put POA rows (price IS NULL)
 # at one end regardless, so it should not be the first thing a visitor
-# meets. Every option is an indexed column — no computed sorts.
+# meets. Every option is an indexed column: no computed sorts.
 SORTS = {
     "newest":     ("first_seen", True),
     "price_asc":  ("price", False),
@@ -161,7 +161,7 @@ DEFAULT_SORT = "newest"
 #
 # Agents post rentals under "For Sale" and the portals publish them as
 # submitted. A monthly rent is ~100x smaller than a sale price, so every
-# one of these sorts to the TOP of a cheapest-first sale page — the first
+# one of these sorts to the TOP of a cheapest-first sale page: the first
 # thing a buyer sees, and where every paid click lands.
 #
 # Verified on Property24, 2026-09-07: "5 Bedroom House for Sale in
@@ -201,7 +201,7 @@ def apply_sale_price_floor(q, category: str):
     """Hide sale rows whose price is implausible for a sale.
 
     NOT a data mutation. `category` is what the source told us, and we have
-    no evidence it is wrong — only that the price is implausible for it.
+    no evidence it is wrong, only that the price is implausible for it.
     Same stance as ADR 0010: suppress at display time, leave the row
     intact, and keep the property page resolving for direct links.
 
@@ -229,7 +229,7 @@ def home(
     sort: str = Query(DEFAULT_SORT),
     page: int = Query(1, ge=1),
 ):
-    """Search page — also the homepage. Server-rendered results."""
+    """Search page: also the homepage. Server-rendered results."""
     db = get_client()
 
     bedrooms = _opt_int(bedrooms)
@@ -296,7 +296,7 @@ def home(
         pass
 
     # Crawlable path into the segment pages. Defensive: the view only
-    # exists after seo_support.sql has run — never 500 the homepage.
+    # exists after seo_support.sql has run, never 500 the homepage.
     try:
         top_suburbs = (db.table("suburb_stats")
                        .select("suburb, property_count")
@@ -319,8 +319,8 @@ def home(
         "suburb_prefix": "apartments-for-rent" if category == "rent"
                          else "houses-for-sale",
         # Search-result views must not be indexed. Google found
-        # "/?page=8&category=sale&location=" and spent crawl budget on it
-        # — on a site with 810 sitemap URLs and 5 total clicks, attention
+        # "/?page=8&category=sale&location=" and spent crawl budget on it.
+        # On a site with 810 sitemap URLs and 5 total clicks, attention
         # spent on page 8 of a filtered homepage is attention not spent on
         # the property pages that actually earn those clicks.
         #
@@ -330,7 +330,7 @@ def home(
         #
         # noindex,FOLLOW, not noindex,nofollow: the links through to
         # property pages should still be crawled. And the category roots
-        # (/ and /?category=rent) stay indexable — they're real pages.
+        # (/ and /?category=rent) stay indexable: they're real pages.
         "noindex": bool(location or bedrooms is not None
                         or min_price is not None or max_price is not None
                         or page > 1 or sort != DEFAULT_SORT),
@@ -372,7 +372,7 @@ def property_page(request: Request, slug: str):
             if hit.data:
                 return RedirectResponse(f"/property/{current}", status_code=301)
             if current in seen:
-                break  # circular chain — treat as gone
+                break  # circular chain: treat as gone
             seen.add(current)
         raise HTTPException(status_code=404, detail="Property not found")
 

@@ -4,7 +4,7 @@ from supabase import create_client, Client, ClientOptions
 from backend.common.config import SUPABASE_URL, SUPABASE_KEY, SUPABASE_SERVICE_ROLE_KEY
 
 
-# CACHED, and it matters. Every web request calls get_client() — home,
+# CACHED, and it matters. Every web request calls get_client(): home,
 # property, segment, sitemap, admin. Un-cached, each request built a fresh
 # Supabase client wrapping its own httpx client, connection pool and SSL
 # context, and nothing ever closed them. They accumulated until the 512MB
@@ -17,7 +17,7 @@ from backend.common.config import SUPABASE_URL, SUPABASE_KEY, SUPABASE_SERVICE_R
 # Trade-off accepted: a long-lived client eventually meets Supabase's
 # HTTP/2 GOAWAY after ~10k requests on one connection, where a per-request
 # client never did. httpx opens a fresh connection for the next request, so
-# the cost is at worst a single failed request — against a crash every seven
+# the cost is at worst a single failed request, against a crash every seven
 # hours. The batch scripts already wrap their calls in _with_retry.
 #
 # Note: the cached client holds the key it was created with, so rotating

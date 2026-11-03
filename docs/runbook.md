@@ -78,7 +78,7 @@ uvicorn backend.api.main:app --reload --port 8000
 python -m scripts.backfill_suburbs
 ```
 
-## SQL files (backend/db/) — run once each in Supabase SQL Editor
+## SQL files (backend/db/): run once each in Supabase SQL Editor
 | file | provides |
 |------|----------|
 | `refresh_support.sql` | status backfill/default/check, price_history trigger + baseline |
@@ -97,43 +97,50 @@ editor wraps multi-statement queries in a transaction).
 
 ## Failure modes seen in the wild
 
-**`statement timeout` (57014)** — bulk UPDATE/DELETE too slow, usually
+**`statement timeout` (57014)**: bulk UPDATE/DELETE too slow, usually
 after table bloat from repeated full-table rewrites. Fixed globally:
 `alter role service_role set statement_timeout = '10min'`. If rebuilds
 slow down again: `vacuum (analyze) listings;` (single statement).
 
-**`ConnectionTerminated / GOAWAY`** — Supabase's proxy closes an HTTP/2
+**`ConnectionTerminated / GOAWAY`**: Supabase's proxy closes an HTTP/2
 connection after ~10k requests. Handled: `_with_retry` reconnects, and
 the link_listings RPC cut per-run request count ~100×. If seen
 elsewhere, wrap the call in `_with_retry`.
 
-**`permission denied for table X` (42501)** — new table missing grants.
+**`permission denied for table X` (42501)**: new table missing grants.
 `grant select, insert, update, delete on public.X to service_role;`
 Every new table/view needs this in its SQL file.
 
-**Admin key 401 after editing `.env`** — dotenv loads at process start;
+**Admin key 401 after editing `.env`**: dotenv loads at process start;
 `--reload` watches .py files only. Restart uvicorn. Also URL-encode the
 key (`urllib.parse.quote`) if it has special characters.
 
-**Silent rebuild failure** — a crashed persist run leaves the site
+**Silent rebuild failure**: a crashed persist run leaves the site
 serving stale or zero properties with no obvious symptom. Always check
 the log tail + `--check` after a run.
 
-**Scrape looks broken (0 listings/page)** — site markup changed. Parser
+**Scrape looks broken (0 listings/page)**: site markup changed. Parser
 fix required; the stale-pass guard (<50% of active count) protects the
 DB meanwhile.
 
-**Pagination never ends (404s to the page cap)** — sites differ in
+**Pagination never ends (404s to the page cap)**: sites differ in
 end-of-listing behaviour: P24 serves empty pages, BRK 404s. Both
 scrapers stop on 2 empty pages OR 3 consecutive failures.
 
-**`chk_status` / check-constraint violation on a rarely-written value**
-— a legacy constraint predating the pipeline didn't allow 'delisted';
+**`chk_status` / check-constraint violation on a rarely-written value**:
+a legacy constraint predating the pipeline didn't allow 'delisted';
 it only fired on the first run old enough to delist anything.
 Constraints on legacy columns fire on FIRST WRITE of a new value, not
-at deploy time — test rare transitions early.
+at deploy time: test rare transitions early.
 
-**Resuming a crashed run's --stale stage** — NEVER bare `--stale`: the
+**`.env` silently overriding a fix in `config.py`**: the User-Agent
+contact and the request delay were corrected in `config.py` on 2 Sep,
+but a local `.env` copied from an old `.env.example` still set both, and
+`os.getenv` prefers the environment. Local scrapes kept sending a
+placeholder contact at a 2s delay until November. When changing a
+default, check `.env` too, or print `config.USER_AGENT` before a run.
+
+**Resuming a crashed run's --stale stage**: NEVER bare `--stale`: the
 cutoff defaults to the new invocation's start time and mass-stales
 everything scraped before it. Pass the original run's timestamp:
 `--stale-cutoff "<'Run started' line from the crashed log>"`.

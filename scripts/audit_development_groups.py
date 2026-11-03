@@ -4,7 +4,7 @@ rather than guessed.
 ADR 0009 sets MIN_DEVELOPMENT_GROUP = 4 on a plausibility argument: four
 adverts identical on eight fields are unlikely to be four independent
 flats, two might be. That argument deserves the same treatment the scorer
-got — click through to the source adverts and count how often the group is
+got: click through to the source adverts and count how often the group is
 really one building.
 
 Writes a markdown worksheet with a verdict column to fill in. Groups are
@@ -41,7 +41,7 @@ def fetch_active_properties(db) -> List[dict]:
     rows: List[dict] = []
     offset = 0
     while True:
-        # .order("id") before .range() — without a stable sort PostgREST may
+        # .order("id") before .range(): without a stable sort PostgREST may
         # repeat or skip rows across pages.
         batch = (db.table("properties")
                  .select("id, slug, category, suburb, location, title, "
@@ -60,7 +60,7 @@ def fetch_active_properties(db) -> List[dict]:
 
 
 def fetch_listings_for(db, property_ids: List[int]) -> Dict[int, List[dict]]:
-    """Member adverts per property, chunked — a 200-id `in_` filter builds a
+    """Member adverts per property, chunked: a 200-id `in_` filter builds a
     URL long enough to be rejected."""
     out: Dict[int, List[dict]] = defaultdict(list)
     CHUNK = 50

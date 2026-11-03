@@ -1,4 +1,4 @@
-"""Admin review UI — side-by-side pair triage with merge/dismiss buttons.
+"""Admin review UI: side-by-side pair triage with merge/dismiss buttons.
 
 Auth: ?key=<ADMIN_API_KEY> in the URL (solo-admin pragmatism; the page
 is Disallow'd in robots.txt and never linked from public pages). The
@@ -135,7 +135,7 @@ async def admin_batch(request: Request):
         if not name.startswith("decision_") or value == "skip":
             continue
         # Keyed by LISTING PAIR (stable across rebuilds), not match id
-        # (wiped every rebuild — a nightly rebuild mid-triage used to
+        # (wiped every rebuild: a nightly rebuild mid-triage used to
         # invalidate every open decision). Resolve the pair's current
         # match row at apply time.
         try:

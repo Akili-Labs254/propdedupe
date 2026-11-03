@@ -1,6 +1,6 @@
 """Central configuration. Reads secrets from a local .env file.
 
-Copy .env.example to .env and fill in your values. .env is gitignored — never
+Copy .env.example to .env and fill in your values. .env is gitignored. Never
 commit real credentials.
 """
 import os
@@ -17,7 +17,7 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
 # ── Scraper politeness ──
 # The contact address must be REAL. This shipped as "you@example.com" for
-# two months — a politeness header inviting contact at an address nobody
+# two months: a politeness header inviting contact at an address nobody
 # reads, which is worse than no address: it looks like boilerplate that was
 # never meant. When BuyRentKenya's team saw this crawler in their logs, they
 # had no way to ask about it. They blocked it instead (ADR 0010).

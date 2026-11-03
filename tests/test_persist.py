@@ -5,7 +5,7 @@ properties inherit stable public URLs. A rebuild that dies partway leaves a
 partial properties table; re-running then snapshots THAT. The old code only
 fell back to the crash-safe copy when the live snapshot was completely
 empty, so a partial state (6,412 of ~28,000 properties) sailed through and
-overwrote the good copy — churning 26,346 URLs on 2026-08-03.
+overwrote the good copy: churning 26,346 URLs on 2026-08-03.
 
 Run: pytest tests/test_persist.py
 """
@@ -83,7 +83,7 @@ def test_first_run_with_data_persists():
 
 
 def test_empty_live_recovers_stored():
-    """Total wipe — the pre-existing recovery path must still work."""
+    """Total wipe: the pre-existing recovery path must still work."""
     snap, persist, note = resolve_slug_snapshot({}, 500, stored(500))
     assert len(snap) == 500
     assert persist is False
@@ -107,7 +107,7 @@ def test_group_by_cluster_key_splits_variants():
 
 
 def test_group_by_cluster_key_isolates_falsy_keys():
-    """Falsy cluster_keys must each become their own group — lumping them
+    """Falsy cluster_keys must each become their own group: lumping them
     produced listing_a_id == listing_b_id and tripped matches_pair_order."""
     details = {1: {"cluster_key": None}, 2: {"cluster_key": ""}}
     assert len(_group_by_cluster_key([1, 2], details)) == 2

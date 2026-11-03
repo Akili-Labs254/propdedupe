@@ -5,7 +5,7 @@
 
 The long-tail traffic play. Every page is server-rendered with computed
 stats (count, price range, median) so it's genuinely more useful than
-the portals' generic filter pages — and only pages with enough inventory
+the portals' generic filter pages, and only pages with enough inventory
 exist at all (MIN_SEGMENT), so we never serve Google thin content. Rent
 pages 404 until rental data lands, then appear automatically.
 
@@ -38,19 +38,19 @@ BASE_URL = os.getenv("SITE_BASE_URL", "http://localhost:8000").rstrip("/")
 # domain with no backlinks gets very little. Submitting everything
 # spends that budget on the wrong pages: at 2026-07-29 Search Console
 # reported 1.13K indexed against 28,249 "Discovered - currently not
-# indexed" — i.e. Google saw the URLs and declined to crawl them.
+# indexed": i.e. Google saw the URLs and declined to crawl them.
 #
 # The corpus is ~452 segment pages vs ~28,415 property pages, so 98% of
 # the sitemap was thin, largely portal-duplicative detail pages while the
-# segment pages — the ones carrying unique aggregated data, and the ones
-# actually ranking (position ~61 for "houses for sale in nairobi") — were
+# segment pages, the ones carrying unique aggregated data and the ones
+# actually ranking (position ~61 for "houses for sale in nairobi"), were
 # 2% of it.
 #
 # So the sitemap now carries segments plus only the multi-source
 # properties (~355): those are the pages that demonstrate the whole point
 # of the product, and are the least duplicative of any single source.
 # Single-source property pages stay fully crawlable via internal links
-# from their segment pages — they're just no longer pushed at Google.
+# from their segment pages: they're just no longer pushed at Google.
 #
 # Revisit once the domain has real backlinks and crawl budget to spend.
 SITEMAP_MULTI_SOURCE_ONLY = True
@@ -58,7 +58,7 @@ SITEMAP_MULTI_SOURCE_ONLY = True
 _BEDS_RE = re.compile(r"^([1-8])-bedroom$")
 
 # URL prefix + copy per category. Adding a category = one entry here
-# (plus scraper URLs) — everything else derives from it.
+# (plus scraper URLs): everything else derives from it.
 # NOTE the mismatch between prefix and plural on "sale". The URL prefix
 # is frozen: ~810 pages are indexed under /houses-for-sale/, and
 # re-prefixing would mean 301-ing all of them mid-SEO-ramp for a cosmetic
@@ -69,7 +69,7 @@ _BEDS_RE = re.compile(r"^([1-8])-bedroom$")
 #
 # "Homes" over "Property" because it stays close to the keyword the pages
 # already rank for ("houses for sale <suburb>") while covering flats
-# honestly — "homes for sale" is a searched term in its own right.
+# honestly: "homes for sale" is a searched term in its own right.
 CATEGORIES = {
     "sale": {"prefix": "houses-for-sale", "plural": "Homes",
              "action": "for Sale"},
@@ -86,7 +86,7 @@ def display_name(suburb: str) -> str:
 # suburb containing punctuation, e.g. "st.mary road" → "st-mary-road").
 # None exist today, but normalize_suburb() can emit them, and the failure
 # mode would be a silent 404. Cached because the list is ~80 rows and only
-# changes on a dedup rebuild (3×/week) — the free-tier box is IO-bound.
+# changes on a dedup rebuild (3×/week): the free-tier box is IO-bound.
 _SLUG_CACHE = {}            # category → (expires_at, {slug: suburb})
 _SLUG_CACHE_TTL = 600       # seconds
 
@@ -99,7 +99,7 @@ def suburb_for_slug(db, slug: str, category: str) -> Optional[str]:
                 .select("suburb")
                 .eq("category", category)
                 .eq("is_suburb_total", True)
-                .gte("property_count", 1)   # NOT MIN_SEGMENT — thin suburbs
+                .gte("property_count", 1)   # NOT MIN_SEGMENT: thin suburbs
                 .execute())                 # still serve, see _segment_page
         mapping = {suburb_slug(r["suburb"]): r["suburb"] for r in rows.data}
         entry = _SLUG_CACHE[category] = (now + _SLUG_CACHE_TTL, mapping)
@@ -161,7 +161,7 @@ def fetch_properties(db, suburb: str, category: str,
 
 def qualifying_neighbours(db, suburb: str, category: str) -> List[dict]:
     """Adjacent suburbs (from the dedup adjacency graph) that have their
-    own segment page — the internal link mesh."""
+    own segment page: the internal link mesh."""
     neighbours = sorted(ADJACENCY.get(suburb, ()))
     if not neighbours:
         return []
@@ -220,7 +220,7 @@ def _segment_page(request: Request, suburb: str, category: str,
 
     # Segment pages used to 404 below MIN_SEGMENT. But inventory oscillates
     # across that line, so a page Google indexed while it had 5 properties
-    # would 404 once it dropped to 4 — and a 404 on an indexed URL is a hard
+    # would 404 once it dropped to 4, and a 404 on an indexed URL is a hard
     # signal to drop it. 2026-08: our single best search click landed on
     # /apartments-for-rent/city-park-drive and got a 404; it has 6 properties
     # again now. 978 segment pages currently sit below the line.
@@ -228,8 +228,8 @@ def _segment_page(request: Request, suburb: str, category: str,
     # So the threshold no longer decides whether the page EXISTS, only
     # whether it's indexable. Thin pages serve (a real page beats a dead end
     # for anyone arriving from an old SERP) but carry noindex, and are still
-    # excluded from the sitemap, the suburb index and the nearby-suburb links
-    # — so nothing new gets discovered through us.
+    # excluded from the sitemap, the suburb index and the nearby-suburb
+    # links, so nothing new gets discovered through us.
     thin = stats["property_count"] < MIN_SEGMENT
 
     result = fetch_properties(db, suburb, category, bedrooms, page, sort)
@@ -324,7 +324,7 @@ def sitemap():
     for category, cfg in CATEGORIES.items():
         totals = suburb_totals(db, category)
         if not totals:
-            continue  # category not launched yet — no empty index page
+            continue  # category not launched yet: no empty index page
         prefix = cfg["prefix"]
         urls.append(f"{BASE_URL}/{prefix}")
         for row in totals:

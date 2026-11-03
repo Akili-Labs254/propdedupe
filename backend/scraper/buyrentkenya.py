@@ -18,7 +18,7 @@ Source notes (buyrentkenya.com):
       @id       : contains listing id, pattern item-XXXXXXX (e.g. item-4014286)
   - Pagination : ?page=N  (22 per page)
 
-Note: bedrooms & location are embedded in `name`, not separate fields — parse
+Note: bedrooms & location are embedded in `name`, not separate fields, parse
 them out with a small regex ("4 Bed" -> 4, "in Runda" -> Runda).
 """
 from backend.scraper.base import BaseScraper, ScrapedListing, ParserOutOfDate
@@ -91,12 +91,12 @@ SLUG_BEDS_RE = re.compile(r"^(\d+)-bedroom", re.I)
 
 # Uploaded photos are UUID-named; agency logos are not. The first <img> in
 # a card is the agent's badge, so picking image_urls[0] blindly would hash
-# the agency logo instead of the property — and a logo shared across an
+# the agency logo instead of the property, and a logo shared across an
 # agency's listings is exactly what CK_GROUP_CAP exists to defend against.
 #
 # Anchored to the FILENAME, not the whole URL. Agency assets are served
 # from /agencies/<uuid>/logo_....webp, so a URL-wide UUID search matches
-# the agency's own id and cheerfully returns the logo — which is what the
+# the agency's own id and cheerfully returns the logo, which is what the
 # first version of this did, caught by test_hero_image_is_not_the_agency_logo.
 IMG_UUID_RE = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
@@ -108,7 +108,7 @@ IMG_EXCLUDE = ("logo", "/agencies/", "placeholder", "watermark")
 CARD_LABELS = {"description"}
 
 
-# The new CDN appends a rendition suffix — the SAME photo arrives as
+# The new CDN appends a rendition suffix: the SAME photo arrives as
 # "...jpeg_cardMobile.webp" or "...jpeg_medium.webp" depending on which
 # card variant rendered it. cluster_key hashes image_url, so leaving that
 # to chance would split identical listings on nothing but a breakpoint.
@@ -152,7 +152,7 @@ def _card_image(card) -> Optional[str]:
     return None
 
 
-# A location is a place name — short, wordy, no money and no marketing.
+# A location is a place name: short, wordy, no money and no marketing.
 # Anything failing these is a mis-selected fragment, and accepting it is
 # worse than accepting nothing: `location` feeds suburb assignment, so a
 # polluted value silently removes the listing from its segment page (and
@@ -185,7 +185,7 @@ SLUG_INTENT_RE = re.compile(r"-for-(?:sale|rent)-", re.I)
 
 
 def _location_from_slug(slug: str) -> Optional[str]:
-    """Area name from the URL slug — the most durable field on the page.
+    """Area name from the URL slug: the most durable field on the page.
 
     Takes everything between the for-sale/for-rent marker and the trailing
     listing id, NOT just the last token: areas are frequently two words
@@ -231,7 +231,7 @@ class BuyRentKenyaScraper(BaseScraper):
         soup = BeautifulSoup(html, "html.parser")
 
         # Take the first ld+json block that actually carries @graph rather
-        # than blindly the first block — BRK now emits WebSite/Organization
+        # than blindly the first block: BRK now emits WebSite/Organization
         # nodes too, and a future extra block must not shadow the real one.
         data = None
         for block in soup.find_all("script", type="application/ld+json"):
@@ -248,7 +248,7 @@ class BuyRentKenyaScraper(BaseScraper):
         if data is None:
             # No structured data at all. If the page is nonetheless showing
             # listing cards, the markup changed and we must not report this
-            # as an empty page — see the guard note below.
+            # as an empty page: see the guard note below.
             if anchors:
                 raise ParserOutOfDate(
                     f"no ld+json @graph block, but {len(anchors)} listing "
@@ -260,7 +260,7 @@ class BuyRentKenyaScraper(BaseScraper):
 
         # 2026-09-01: BRK re-platformed. Two things changed together and
         # either alone was fatal:
-        #   1. @type became a LIST — ["WebPage", "SearchResultsPage"] — so
+        #   1. @type became a LIST (["WebPage", "SearchResultsPage"]), so
         #      the old `node.get("@type") == "WebPage"` never matched.
         #   2. ItemList moved OUT of WebPage.mainEntity into its own
         #      top-level @graph node.
@@ -273,8 +273,8 @@ class BuyRentKenyaScraper(BaseScraper):
                 f"parsed 0 items from JSON-LD but the page shows "
                 f"{len(anchors)} listing anchors — BRK markup has changed")
 
-        # The ItemList now carries ONLY {@type, position, url} — no nested
-        # Product — so every field below comes from the rendered card. The
+        # The ItemList now carries ONLY {@type, position, url}: no nested
+        # Product, so every field below comes from the rendered card. The
         # JSON-LD is kept as a canary: it still states authoritatively how
         # many listings this page holds, so a mismatch against the cards we
         # can actually read means the markup moved again.

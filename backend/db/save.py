@@ -5,7 +5,7 @@ from backend.db.client import get_client
 import hashlib
 
 # Plausible price bands per category, in KES. Outside these a "price" is a
-# portal data error, not a bargain — agents typo, paste sale prices into
+# portal data error, not a bargain: agents typo, paste sale prices into
 # rent listings, and post bait figures. Bounds were set from the observed
 # tails, not intuition:
 #   rent  <3,000    120 listings, KSh 0-2,900. Not a monthly rent.
@@ -15,7 +15,7 @@ import hashlib
 #   sale  <500,000  141 listings. Under ~USD 3,800 for a Nairobi
 #                   property is not credible. 500k-2m (21) is cheap but
 #                   possible, so it stays.
-# Junk prices are treated exactly like POA — NULL, never 0 (standing
+# Junk prices are treated exactly like POA: NULL, never 0 (standing
 # rule). The listing survives and still links out; we just decline to
 # publish a number we don't believe.
 PRICE_BOUNDS = {
@@ -38,11 +38,11 @@ def sane_price(price: Optional[float], category: str) -> Optional[float]:
 # very small flat. Set from the observed tails across 18,081 active
 # listings carrying a size:
 #   <10     418 rows, smallest 1 m². Not a dwelling.
-#   20-25   189 rows — a real Nairobi bedsitter, so the floor sits below.
-#   500-1k  796 rows — real, a large Karen or Runda house.
+#   20-25   189 rows: a real Nairobi bedsitter, so the floor sits below.
+#   500-1k  796 rows: real, a large Karen or Runda house.
 #   >2000   175 rows, largest 542,331 m² (54 hectares). Plot sizes and
 #           typos, not floor area.
-# Unlike price this needs no per-category split — a house is a house.
+# Unlike price this needs no per-category split: a house is a house.
 SIZE_BOUNDS = (10.0, 2000.0)
 
 
@@ -70,7 +70,7 @@ def compute_cluster_key(listing) -> str:
 def _existing_categories(db, source_id: int, ids: list) -> dict:
     """{source_listing_id: category} for ids already stored.
 
-    Chunked at 100 to stay inside Supabase's URL length limit — same
+    Chunked at 100 to stay inside Supabase's URL length limit: same
     reason fetch_listing_details chunks.
     """
     found = {}
@@ -93,7 +93,7 @@ def save_listings(listings: list, source_id: int, category: str = "sale") -> Non
 
     # category is a HARD partition (standing rule), but the upsert
     # conflict key is (source_id, source_listing_id) and does NOT include
-    # category — so a listing surfacing under the wrong category scrape
+    # category, so a listing surfacing under the wrong category scrape
     # would silently overwrite the stored row's category AND price. That
     # is the shape of the price_history corruption found 2026-08: rent
     # rows receiving sale-magnitude prices, minute after minute.

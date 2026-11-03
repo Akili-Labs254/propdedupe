@@ -1,4 +1,4 @@
-"""The development key — grouping adverts that are identical on every
+"""The development key: grouping adverts that are identical on every
 human-readable field.
 
 Cross-source dedup (step 1) and the intra-P24 `cluster_key` (step 2) are
@@ -6,7 +6,7 @@ both image-keyed, so neither catches a development advertised unit by unit:
 those adverts carry *different photographs of the same building*, and the
 hashes correctly report them as different images.
 
-This key ignores images entirely and asks the opposite question — is every
+This key ignores images entirely and asks the opposite question: is every
 word a buyer can read the same? See ADR 0009.
 
 MIRRORS cluster_key's discipline: if this formula is ever reimplemented in
@@ -26,7 +26,7 @@ NULL_SENTINEL = "~"
 # Below this, a group is not treated as a development. Measured on the
 # 2026-08-28 corpus: groups of 2 and 3 account for only 23% of the possible
 # collapse but carry nearly all of the false-merge risk, because two adverts
-# identical on every field are genuinely ambiguous — they may be two
+# identical on every field are genuinely ambiguous: they may be two
 # different flats, or one flat photographed by two agents. Groups of 4+ are
 # not plausibly independent coincidences across eight fields. ADR 0009.
 MIN_DEVELOPMENT_GROUP = 4
@@ -66,7 +66,7 @@ def development_key(row: dict) -> Optional[str]:
 
     Returns None when the row lacks the fields that make the key meaningful.
     A row without a price, suburb or bed count cannot be confidently grouped
-    with anything, and must stay a singleton — this is the same fail-closed
+    with anything, and must stay a singleton: this is the same fail-closed
     stance ADR 0008 takes on incomplete crawls.
 
     Accepts both listing rows (`baths`) and property rows (`bathrooms`).

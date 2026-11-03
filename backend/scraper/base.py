@@ -4,7 +4,7 @@ Every source (Property24, BuyRentKenya, ...) parses different HTML/JSON but must
 emit the SAME normalized shape: a `ScrapedListing`. That common output is what
 lets the dedup engine treat all sources uniformly.
 
-This is the 'per-source strategy, common output' pattern — each scraper
+This is the 'per-source strategy, common output' pattern: each scraper
 subclasses BaseScraper and implements parse(), but the rest of the pipeline
 never needs to know which site a listing came from.
 """
@@ -34,7 +34,7 @@ class ParserOutOfDate(RuntimeError):
     listings being marked dead.
 
     An exception carries no HTTP status, so `is_end_of_pagination` returns
-    False for it (ADR 0008) — the run fails closed, `complete` stays False,
+    False for it (ADR 0008): the run fails closed, `complete` stays False,
     and the stale pass is skipped. Loud and safe beats quiet and wrong.
     """
 
@@ -70,7 +70,7 @@ class BaseScraper:
         """Politely fetch a page and return its HTML.
 
         Rate-limited, with exponential backoff on 429/5xx (the vision
-        doc's polite-indexer rule, finally implemented — P24 rate-limits
+        doc's polite-indexer rule, finally implemented: P24 rate-limits
         bursts from datacenter IPs with 503s that pass on retry).
         Hard errors (404 etc.) raise immediately so end-of-pagination
         detection still works.
@@ -106,20 +106,20 @@ def is_end_of_pagination(exc: Exception) -> bool:
 
     Both sites signal the end of a listing index by 404ing rather than
     serving an empty page, so a failure streak is the normal way a full
-    crawl terminates. But a 503 streak looks identical to the caller —
+    crawl terminates. But a 503 streak looks identical to the caller,
     and on 2026-08-26 P24 threw 503s after 58 of 522 sale pages, the
     scraper reported complete=True, and stale detection was one guard
     away from marking 41,000 live listings dead.
 
     So: "not found" means we genuinely walked off the end of the list.
-    Anything else — 5xx, a timeout, a connection error, or a refusal —
+    Anything else (5xx, a timeout, a connection error, or a refusal)
     means we learned nothing about where the list ends, and the crawl must
     not be called complete.
 
     BaseScraper.fetch already retries 429/5xx with backoff (0/10/30/60s),
     so anything reaching here has survived ~100 seconds of trying.
 
-    2026-09-02 — NOT all of 4xx. This previously read
+    2026-09-02, NOT all of 4xx. This previously read
     `400 <= status < 500`, which disagreed with ADR 0008's own table
     (404/410 only) and swallowed every "you may not have this" status.
     BuyRentKenya began returning **403** to GitHub's runners that day;

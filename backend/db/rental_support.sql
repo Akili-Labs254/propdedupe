@@ -1,5 +1,5 @@
 -- Rentals as a first-class category. Run ONCE in the Supabase SQL
--- Editor BEFORE the first rental scrape. Idempotent — safe to re-run.
+-- Editor BEFORE the first rental scrape. Idempotent: safe to re-run.
 --
 -- category is a HARD PARTITION in dedup: a house listed for sale AND
 -- rent shares photos, but those are different market offers and must

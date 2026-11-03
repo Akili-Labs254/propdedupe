@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Fikia — Nairobi property search, deduplicated{% endblock %}</title>
   <meta name="description" content="{% block description %}Search every Nairobi property listing in one place — deduplicated across BuyRentKenya and Property24, with stale listings removed.{% endblock %}">
-  {# Open Graph: what WhatsApp/Facebook show when a link is shared —
-     core GTM infrastructure, since distribution is group shares. #}
+  {# Open Graph: what WhatsApp/Facebook show when a link is shared.
+     Most visitors arrive from links shared in groups. #}
   <meta property="og:site_name" content="Fikia">
   <meta property="og:type" content="website">
   {% block og %}
@@ -40,7 +40,7 @@
   <!-- Outbound click tracking. The click-through to a source listing is the
        closest thing to a conversion this site has: it is the moment a
        visitor actually goes to enquire, and it is what a pay-per-lead model
-       would eventually charge for. Until now it was invisible — we could see
+       would eventually charge for. Until now it was invisible: we could see
        people arrive and search, but not whether they found anything.
 
        The links are target="_blank", so the page never unloads and the async
@@ -48,15 +48,15 @@
        own script is async and may not have loaded yet.
 
        Path is per-source (out/property24, out/buyrentkenya). Per-property
-       counts — needed later for "your listing got N enquiries" — would just
+       counts, needed later for "your listing got N enquiries", would just
        append the slug, at the cost of thousands of distinct paths.
 
        CAMPAIGN CARRY-THROUGH: the ?ref= tag only exists on the landing URL.
        By the time someone clicks out to a source listing they are two or
        three pages deep and the tag is long gone, so the event landed as a
        bare out/property24 and there was no way to say which campaign
-       produced a conversion. That is exactly the number a paid test needs —
-       cost per outbound click, per ad group — so we stash the ref on first
+       produced a conversion. That is exactly the number a paid test needs:
+       cost per outbound click, per ad group, so we stash the ref on first
        arrival and attach it to every outbound event for the rest of the
        session.
 
@@ -66,7 +66,7 @@
     (function () {
       var KEY = "fikia_ref";
 
-      // Capture on arrival. First ref of the session wins — if someone
+      // Capture on arrival. First ref of the session wins: if someone
       // lands from an ad and later types a vanity URL, the ad still gets
       // the credit for bringing them.
       try {

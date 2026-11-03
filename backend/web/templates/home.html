@@ -3,7 +3,7 @@
 
 {% block head %}
 {# Every filter combination is a distinct URL serving near-duplicate
-   results — the faceted-navigation trap. Canonical points every variant
+   results: the faceted-navigation trap. Canonical points every variant
    at the category root; filtered and paginated views are noindex,follow
    so links through to property pages are still crawled. #}
 <link rel="canonical" href="{{ BASE_URL }}{{ canonical }}">

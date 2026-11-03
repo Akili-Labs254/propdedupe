@@ -22,7 +22,7 @@ From the last full crawl (6 September 2026):
 
 - **57,744** live adverts become **35,791** distinct results
 - **718** properties were found on both portals
-- 151 tests
+- 174 tests
 
 Not all of that gap is "duplicates". Some of it is the same advert posted
 many times, and some is a development advertising every identical unit

@@ -1,4 +1,4 @@
-"""Review queue endpoints — admin-only match review and resolution."""
+"""Review queue endpoints: admin-only match review and resolution."""
 import os
 from typing import Optional
 from fastapi import APIRouter, Query, HTTPException, Header
@@ -35,7 +35,7 @@ def list_review_pairs(
     scope: Optional[str] = Query(None, description="'cross' or 'intra'"),
     category: Optional[str] = Query(None, description="'sale' or 'rent'"),
 ):
-    """List match pairs in the review queue — pairs the scorer flagged as
+    """List match pairs in the review queue: pairs the scorer flagged as
     possibly the same property but wasn't confident enough to auto-merge."""
     db = get_client()
     return fetch_review_page(db, page, per_page, scope, category)
@@ -134,7 +134,7 @@ def merge_properties(
     _record_decision(db, {"listing_a_id": min(reps),
                           "listing_b_id": max(reps)}, "merge")
 
-    # Redirect the removed slug — it may already be indexed
+    # Redirect the removed slug: it may already be indexed
     db.table("property_slugs").upsert(
         {"slug": slug_remove, "target_slug": slug_keep},
         on_conflict="slug").execute()
@@ -168,7 +168,7 @@ def merge_properties(
 
 @router.post("/{match_id}/merge")
 def merge_pair(match_id: int, x_admin_key: Optional[str] = Header(None)):
-    """Merge a review pair — move all listings from property B to property A,
+    """Merge a review pair: move all listings from property B to property A,
     delete property B, mark the match as resolved."""
     _require_admin(x_admin_key)
     db = get_client()
@@ -176,7 +176,7 @@ def merge_pair(match_id: int, x_admin_key: Optional[str] = Header(None)):
 
 
 def do_merge(db, match_id: int) -> dict:
-    """Core merge logic — shared by the JSON API and the admin page.
+    """Core merge logic: shared by the JSON API and the admin page.
     Caller is responsible for auth."""
     # Fetch the match
     match = (db.table("matches")
@@ -209,7 +209,7 @@ def do_merge(db, match_id: int) -> dict:
     if keep_pid is None or remove_pid is None:
         # Mid-rebuild: property links are cleared and not yet rebuilt.
         # The decision above IS recorded and will apply on the next
-        # rebuild — only the immediate merge is skipped.
+        # rebuild, only the immediate merge is skipped.
         raise HTTPException(
             status_code=409,
             detail="Listing not linked to a property (rebuild in "
@@ -217,11 +217,11 @@ def do_merge(db, match_id: int) -> dict:
                    "rebuild.")
 
     if keep_pid == remove_pid:
-        # Already the same property — just update the match tier
+        # Already the same property, just update the match tier
         db.table("matches").update({"tier": "merged"}).eq("id", match_id).execute()
         return {"detail": "Listings already share a property", "property_id": keep_pid}
 
-    # Redirect the removed property's slug before deleting it — a merged
+    # Redirect the removed property's slug before deleting it: a merged
     # property's URL may already be indexed and must not 404.
     slugs = (db.table("properties")
              .select("id, slug")
@@ -262,14 +262,14 @@ def do_merge(db, match_id: int) -> dict:
 
 @router.post("/{match_id}/dismiss")
 def dismiss_pair(match_id: int, x_admin_key: Optional[str] = Header(None)):
-    """Dismiss a review pair — mark as not a match so it won't reappear."""
+    """Dismiss a review pair: mark as not a match so it won't reappear."""
     _require_admin(x_admin_key)
     db = get_client()
     return do_dismiss(db, match_id)
 
 
 def do_dismiss(db, match_id: int) -> dict:
-    """Core dismiss logic — shared by the JSON API and the admin page.
+    """Core dismiss logic: shared by the JSON API and the admin page.
     Caller is responsible for auth."""
     match = (db.table("matches")
              .select("*")

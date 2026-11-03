@@ -2,7 +2,7 @@
 
 refresh.py is the only code that mass-mutates listing status, and until
 now it had no tests. On 2026-08-12 a capped rent scrape marked 7,240 live
-P24 rentals stale or delisted — 41% of everything then flagged as gone —
+P24 rentals stale or delisted, 41% of everything then flagged as gone,
 because "not seen this run" was read as "removed from the site" when the
 scrape had simply stopped at page 1,500 and never looked further.
 
@@ -69,7 +69,7 @@ def test_capped_scrape_does_not_stale(flips):
 
 def test_capped_rent_does_not_block_completed_sale(flips):
     """The categories are crawled to different depths, so they cannot
-    share one decision — sale finished and must still be staled."""
+    share one decision: sale finished and must still be staled."""
     results = {2: {
         "saved": 42742, "pre_active": 32723,
         "categories": {
@@ -101,7 +101,7 @@ def test_unscraped_source_is_skipped(flips):
 
 def test_low_yield_scrape_is_skipped(flips):
     """A parser that broke mid-run, or a block that looked like the end
-    of pagination. Saved 10% of the prior active count — do not trust it."""
+    of pagination. Saved 10% of the prior active count: do not trust it."""
     results = {2: result(saved=500, complete=True, pre_active=5000)}
     refresh.stage_stale(FakeDB(), RUN_START, results)
     assert flips == []
@@ -157,12 +157,12 @@ def test_delist_runs_before_stale(flips):
 # ── the scrapers' half of the contract ───────────────────────────────
 
 def test_scrapers_report_completeness(monkeypatch):
-    """run() must return (saved, complete) — stage_scrape unpacks two
+    """run() must return (saved, complete): stage_scrape unpacks two
     values and a bare int would raise.
 
     Note the exception carries a real 404 status. An exception with no
     status (a parse crash, say) is deliberately NOT treated as the end of
-    the list — we only know we walked off the end if the server said so.
+    the list: we only know we walked off the end if the server said so.
     """
     from scripts import scrape_property24, scrape_buyrentkenya
 
@@ -186,7 +186,7 @@ def test_unknown_exception_is_not_the_end_of_the_list(monkeypatch):
 
 def test_multi_index_category_sums_and_ands(monkeypatch):
     """A category spans several index URLs (houses + apartments). Saved
-    counts add; completeness must AND — one capped index means the
+    counts add; completeness must AND: one capped index means the
     category was not fully seen, however well the others went."""
     from scripts import scrape_property24 as p24
 
@@ -224,7 +224,7 @@ def test_brk_indexes_apartments_for_sale():
 
 def test_p24_sale_stays_completable():
     """P24 sale-houses is 536 pages and completes, so it stales. P24
-    apartments-for-sale is 4,441 pages and never could — and since
+    apartments-for-sale is 4,441 pages and never could, and since
     `complete` ANDs across a category's indexes, adding it would stop
     the houses staling too. Deliberately excluded until disk allows."""
     from scripts import scrape_property24 as p24
@@ -256,7 +256,7 @@ def _http_error(code):
 
 
 def test_404_streak_is_the_end_of_the_list(monkeypatch):
-    """Both sites 404 past the last page — that IS how a full crawl ends."""
+    """Both sites 404 past the last page: that IS how a full crawl ends."""
     from scripts import scrape_property24 as p24
     _scraper_raising(monkeypatch, p24, "Property24Scraper", _http_error(404))
     saved, complete = p24.run(max_pages=10, category="sale")

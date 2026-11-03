@@ -1,7 +1,7 @@
 """Stable property slugs across dedup rebuilds.
 
 The problem: persist_dedup wipes and rebuilds `properties`, so row IDs
-change every run — but public URLs must never break. The listings layer
+change every run, but public URLs must never break. The listings layer
 has stable identity ((source_id, source_listing_id) never changes), so
 identity flows from members: a rebuilt property inherits the slug that
 the majority of its member listings carried before the rebuild.
@@ -31,7 +31,7 @@ class SlugAllocator:
     """Assigns each rebuilt property a slug, preferring inheritance.
 
     snapshot: {listing_id: slug its property had before this rebuild}.
-    Empty on the first run — everything generates fresh.
+    Empty on the first run: everything generates fresh.
     """
 
     def __init__(self, snapshot: Dict[int, str]):

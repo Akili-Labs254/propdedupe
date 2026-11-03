@@ -1,7 +1,7 @@
 -- SEO layer support: canonical suburb per property + aggregate stats view.
 -- Run ONCE in the Supabase SQL Editor (safe to re-run), then:
 --     python -m scripts.backfill_suburbs
--- (suburb normalization lives in Python — adjacency.py — so the backfill
+-- (suburb normalization lives in Python, adjacency.py, so the backfill
 -- is a script, not SQL. persist_dedup writes suburb itself from now on.)
 
 -- ── 1. suburb column ─────────────────────────────────────────────────

@@ -6,20 +6,20 @@
 --   rent: 3,000 .. 5,000,000
 --   sale: 500,000 .. 20,000,000,000
 --
--- Affects ~428 listings (0.5% of the corpus). Junk prices become NULL —
--- the same treatment as POA — so the listing survives and still links
+-- Affects ~428 listings (0.5% of the corpus). Junk prices become NULL:
+-- the same treatment as POA, so the listing survives and still links
 -- out to its source; we simply stop publishing a number we don't believe.
 --
 -- NOTE on cluster_key: it hashes the price, so these rows' keys now
 -- describe a price they no longer hold. save_listings recomputes the key
 -- on the next scrape of each listing, which self-corrects every ACTIVE
--- row. Stale/delisted rows keep a slightly stale key — harmless, since
+-- row. Stale/delisted rows keep a slightly stale key: harmless, since
 -- intra-source cluster grouping only considers active listings.
 --
 -- Run the dedup rebuild afterwards so properties.price / price_min /
 -- price_max pick up the change.
 
--- Preview first — run this on its own before the updates:
+-- Preview first: run this on its own before the updates:
 --   select category,
 --          count(*) filter (where category='rent'
 --                             and (price < 3000 or price > 5000000)) as rent_junk,

@@ -2,7 +2,7 @@
 
 The card parser split on "|", agent headlines contain pipes, so the title
 lookup missed and the fallback swallowed the headline as the location. 663
-active BRK listings ended up with marketing copy in `location` — and since
+active BRK listings ended up with marketing copy in `location`, and since
 `location` feeds suburb assignment, `properties.suburb` now contains whole
 paragraphs like:
 
@@ -11,7 +11,7 @@ paragraphs like:
 
 Ten properties share that suburb. MIN_SEGMENT is 5, so it generates an
 indexable segment page titled with a marketing paragraph. That is the part
-that needs fixing quickly — thin content that reaches Google is far harder
+that needs fixing quickly: thin content that reaches Google is far harder
 to undo than a bad database row.
 
 The parser is already fixed, but BuyRentKenya closed to crawlers on 2 Sep

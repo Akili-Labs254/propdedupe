@@ -25,7 +25,7 @@ from backend.db.save import save_listings
 #   flats-apartments-for-rent  4,218 listings  211 pages   18 MB
 #
 # 49 MB for the whole source against ~205 MB of headroom, so every BRK
-# category can be crawled to the end — which is the only way its listings
+# category can be crawled to the end, which is the only way its listings
 # ever get staled (ADR 0008). P24 cannot say the same at 773 MB.
 #
 # Rent stays apartments-only (the high-churn, high-duplication wedge);
@@ -65,7 +65,7 @@ def _crawl_index(base_url: str, cap: int, category: str) -> Tuple[int, bool]:
         except Exception as e:
             fail_streak += 1
             # Only a streak of pure "not found" means end-of-list. A 403 is
-            # a refusal, not an absence — see is_end_of_pagination.
+            # a refusal, not an absence: see is_end_of_pagination.
             streak_is_end = streak_is_end and is_end_of_pagination(e)
             print(f"  Failed: {e} (fail streak {fail_streak})")
             if fail_streak >= 3:
@@ -107,7 +107,7 @@ def run(max_pages: Optional[int] = None,
     """Scrape every index in `category` and return (listings_saved, complete).
 
     complete is True only when EVERY index in the category ended
-    pagination on its own — for BRK that is the 404 streak, since it does
+    pagination on its own: for BRK that is the 404 streak, since it does
     not serve empty pages past the end. It is False when any index ran
     out of `cap`: refresh.stage_stale must not read "not seen this run"
     as "removed from the site" for a list it never finished. See ADR 0008.

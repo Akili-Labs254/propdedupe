@@ -2,8 +2,8 @@
 
 The bounds exist because the portals carry genuine junk: a KSh 2 "monthly
 rent", a KSh 300,000,000/month flat, a house "for sale" at KSh 0. Those
-numbers reached the live site — a bait listing at KSh 8,500 sorted to the
-top of price-ascending search — so the parse layer now refuses them.
+numbers reached the live site: a bait listing at KSh 8,500 sorted to the
+top of price-ascending search, so the parse layer now refuses them.
 
 Run: pytest tests/test_save.py
 """
@@ -50,7 +50,7 @@ def test_junk_rent_nulled():
 
 
 def test_plausible_luxury_rent_survives():
-    """1m-5m/month is only 13 listings but serviced penthouses are real —
+    """1m-5m/month is only 13 listings but serviced penthouses are real:
     the cut deliberately sits above them."""
     assert sane_price(1_099_050.0, "rent") == 1_099_050.0
     assert sane_price(2_000_000.0, "rent") == 2_000_000.0
@@ -95,7 +95,7 @@ def test_junk_sizes_nulled():
 
 
 def test_small_bedsitter_survives():
-    """20-25 m² is 189 real listings — the floor deliberately sits below."""
+    """20-25 m² is 189 real listings: the floor deliberately sits below."""
     assert sane_size(22.0) == 22.0
 
 
@@ -183,7 +183,7 @@ def test_matching_category_still_saves(monkeypatch):
 
 
 def test_new_listing_saves_regardless(monkeypatch):
-    """No stored row means no conflict — first sighting always saves."""
+    """No stored row means no conflict: first sighting always saves."""
     rows = run_save(monkeypatch, [scrapable("444")], stored={}, category="rent")
     assert len(rows) == 1
 

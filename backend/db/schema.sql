@@ -1,4 +1,4 @@
--- PropDeDupe — core schema (Phase 0)
+-- PropDeDupe: core schema (Phase 0)
 -- Postgres (via Supabase). Three tables model the entire problem:
 --   sources    : the websites we scrape
 --   listings   : every individual advert we scrape (may be a duplicate)
@@ -46,11 +46,11 @@ create index if not exists idx_listings_price       on listings(price);
 create index if not exists idx_listings_bedrooms    on listings(bedrooms);
 
 -- ─────────────────────────────────────────────────────────────────────────
--- DEFERRED (designed now, built in later weeks — do NOT create these yet):
+-- DEFERRED (designed now, built in later weeks: do NOT create these yet):
 --
 --   listing_images(id, listing_id -> listings, image_url, phash)
 --       perceptual hash per image. On Property24, exact-duplicate listings
---       reuse an IDENTICAL image URL — a near-free first-pass match. Re-
+--       reuse an IDENTICAL image URL: a near-free first-pass match. Re-
 --       uploaded or cross-source dupes need perceptual hashing (phash).
 --
 --   matches(id, listing_a -> listings, listing_b -> listings,

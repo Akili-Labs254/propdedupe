@@ -14,8 +14,8 @@ Works in two layers:
    auto-merge, review queue, distinct.
 
 Key files:
-- `scorer.py` — weighted evidence scorer (5 signals, location gate)
-- `adjacency.py` — suburb name normalization + adjacency graph (78 suburbs, 100 edges)
+- `scorer.py`: weighted evidence scorer (5 signals, location gate)
+- `adjacency.py`: suburb name normalization + adjacency graph (78 suburbs, 100 edges)
 
 See `dedup-pipeline-plan.md` for full signal definitions, weight reasoning,
 and the iteration log.

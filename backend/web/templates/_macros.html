@@ -21,7 +21,7 @@
     {%- set days = prop.first_seen | days_listed -%}
     {# "Seen for", not "on the market for": first_seen is when WE first
        crawled it, so an advert older than the corpus reads as the corpus
-       age. Hidden under 7 days — every listing is new when the index is,
+       age. Hidden under 7 days: every listing is new when the index is,
        and a badge on every card is wallpaper. #}
     {% if days is not none and days >= 7 %}
     <span class="badge badge-age">Seen for {{ days }} days</span>

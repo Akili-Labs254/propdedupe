@@ -1,4 +1,4 @@
-"""Property listing endpoints — the core consumer-facing API."""
+"""Property listing endpoints: the core consumer-facing API."""
 from typing import Optional, List
 from fastapi import APIRouter, Query
 from backend.db.client import get_client
@@ -33,7 +33,7 @@ def list_properties(
     if location is not None:
         query = query.ilike("location", f"%{location}%")
 
-    # Pagination — offset-based
+    # Pagination: offset-based
     offset = (page - 1) * per_page
     if sort == "newest":
         query = query.order("first_seen", desc=True).order("id", desc=True)

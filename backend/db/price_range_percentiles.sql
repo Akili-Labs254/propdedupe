@@ -1,12 +1,12 @@
 -- Replace raw min/max price on segment pages with a robust 5th–95th
 -- percentile band. Run ONCE in the Supabase SQL Editor. Idempotent.
 --
--- Why: ~1.4% of priced rentals are junk from the source portals — agent
+-- Why: ~1.4% of priced rentals are junk from the source portals, agent
 -- typos at both tails (a KSh 2 "monthly rent", a KSh 110,000,000 one).
 -- Medians are robust and were always correct, but min() and max() are BY
 -- DEFINITION the two most extreme values in the group, so 1.4% bad data
--- set 100% of the range lines. Every segment page — i.e. every SEO
--- landing page Google indexes — read "from KSh 2 to KSh 110,000,000".
+-- set 100% of the range lines. Every segment page: i.e. every SEO
+-- landing page Google indexes: read "from KSh 2 to KSh 110,000,000".
 --
 -- percentile_disc (not _cont) returns an ACTUAL price from the set rather
 -- than an interpolated one, so both ends of the band correspond to a real
@@ -18,7 +18,7 @@
 --
 -- Residual: for segments near MIN_SEGMENT (5 properties) the 5th
 -- percentile is still effectively the minimum, so a tiny segment
--- containing a junk price will still show it. Accepted — those are
+-- containing a junk price will still show it. Accepted: those are
 -- low-traffic pages and the alternative is hardcoding per-category price
 -- floors that then need maintaining.
 

@@ -94,7 +94,7 @@ def score_pair(
 
     # Beds gate: a CONFIRMED bed-count mismatch can't auto-merge.
     # Units in one complex share marketing photos (img 0.0) and similar
-    # prices, so a 1-bed vs 2-bed pair can slip under the threshold —
+    # prices, so a 1-bed vs 2-bed pair can slip under the threshold,
     # but different bed counts are never the same unit. Found during
     # rent triage 2026-07-16 (three same-complex pairs at 0.16-0.19).
     # Null bed counts score exactly 0.3 and do NOT trigger this gate.

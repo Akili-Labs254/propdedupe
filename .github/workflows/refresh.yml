@@ -1,17 +1,17 @@
 name: Scheduled refresh
 
-# Two-tier schedule to spare the free-tier Disk IO budget (the full dedup
-# rebuild — clear + re-insert ~30k properties + ~18k matches + relink ~48k
-# listings — is the heavy IO consumer; user traffic is negligible):
+# Two-tier schedule to spare the free-tier Disk IO budget. The full dedup
+# rebuild (clear + re-insert ~30k properties + ~18k matches + relink ~48k
+# listings) is the heavy IO consumer; user traffic is negligible.
 #
 #   LIGHT (daily, most days): scrape + hashes + stale. Keeps listings and
 #     staleness current at low IO cost. New listings don't reach the site
-#     until the next full rebuild — an acceptable 1-2 day lag.
+#     until the next full rebuild: an acceptable 1-2 day lag.
 #   FULL (Mon/Wed/Fri): everything incl. the dedup rebuild that regenerates
 #     properties/matches and publishes new listings to the site.
 #
 # The two cron day-sets don't overlap, so exactly one run fires per day.
-# GitHub emails the repo owner when a run fails — that's the alerting.
+# GitHub emails the repo owner when a run fails. That's the alerting.
 #
 # NOTE: schedules only fire from the default branch (main). Trigger any
 # branch manually via workflow_dispatch (Actions → Scheduled refresh →
@@ -22,24 +22,24 @@ on:
   # BuyRentKenya moved behind Cloudflare in its 1 Sep re-platform and now
   # returns 403 to GitHub's runners. Property24 has blocked datacenter IPs
   # since July. Neither source can be scraped from hosted runners, so every
-  # scheduled run failed with "no listings saved" — a daily false alarm.
+  # scheduled run failed with "no listings saved": a daily false alarm.
   #
   # That noise is the actual danger. The dead-parser check emailed on 29,
   # 30, 31 Aug and 1 Sep about a genuinely broken parser, and those mails
   # went unread. An alert that cries wolf daily stops being an alert.
   #
-  # Scraping is manual until then — see docs/runbook.md. Re-enable by
+  # Scraping is manual until then: see docs/runbook.md. Re-enable by
   # uncommenting, once either:
   #   (a) a self-hosted runner on a residential IP is registered (note the
   #       public-repo caveat: only schedule/workflow_dispatch triggers, and
   #       require approval for external contributors), or
   #   (b) build-then-swap lands in persist_dedup, making an unattended
   #       dedup-only schedule safe. Today a crash mid-rebuild empties the
-  #       site — it has done, twice.
+  #       site: it has done, twice.
   #
   # schedule:
-  #   - cron: "0 1 * * 0,2,4,6"   # Sun/Tue/Thu/Sat 01:00 UTC — LIGHT
-  #   - cron: "0 2 * * 1,3,5"     # Mon/Wed/Fri 02:00 UTC — FULL (dedup)
+  #   - cron: "0 1 * * 0,2,4,6"   # Sun/Tue/Thu/Sat 01:00 UTC, LIGHT
+  #   - cron: "0 2 * * 1,3,5"     # Mon/Wed/Fri 02:00 UTC, FULL (dedup)
   workflow_dispatch:
     inputs:
       max_pages:
@@ -77,7 +77,7 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         # --sources brk: P24 blocks GitHub's datacenter IPs (sustained
-        # 503s even with backoff — tested 2026-07-17). P24 is scraped
+        # 503s even with backoff: tested 2026-07-17). P24 is scraped
         # from a residential IP every few days:
         #   python -m scripts.refresh --all --sources p24 --rent-max-pages 1500
         run: |

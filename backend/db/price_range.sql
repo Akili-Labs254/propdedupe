@@ -1,7 +1,7 @@
--- Price range per property (sources sometimes disagree on price —
+-- Price range per property (sources sometimes disagree on price:
 -- showing the range is aggregator-only information for buyers).
 -- Run ONCE in the Supabase SQL Editor AFTER the current rebuild
--- finishes. Idempotent — safe to re-run. persist_dedup writes these
+-- finishes. Idempotent: safe to re-run. persist_dedup writes these
 -- columns itself from now on; the UPDATE backfills the current build.
 
 alter table properties add column if not exists price_min numeric(14, 2);

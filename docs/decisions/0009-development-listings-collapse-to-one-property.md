@@ -1,7 +1,7 @@
-# 0009 — Development listings collapse to one property
+# 0009: Development listings collapse to one property
 
 **Status:** accepted (product track, August 2026)
-**Extends:** 0004 (intra-source dedup policy), 0005 (measured threshold)
+**Extends:** 0004a (intra-source dedup policy), 0005 (measured threshold)
 
 ## Problem
 
@@ -16,7 +16,7 @@ were the same property. Measured across the whole active sale corpus:
 | largest single group | 807 |
 
 A results page is the product. If four fifths of it is one advert repeated,
-the deduplication engine is not delivering its own promise — it removes
+the deduplication engine is not delivering its own promise: it removes
 duplicates *across* sources and misses the far larger repetition *within*
 one.
 
@@ -36,7 +36,7 @@ groups:
 
 The reason is structural. Cross-source duplication is *the same advert
 reposted*, so the image is identical and hashing works. A development
-advertised unit by unit is *different photographs of the same building* —
+advertised unit by unit is *different photographs of the same building*:
 one advert leads on the kitchen, the next on the balcony. Image similarity
 is evidence of a shared advert, not of a shared building, and this is the
 case that separates the two.
@@ -51,7 +51,7 @@ bathrooms: NULL     size_sqm: NULL
 ```
 
 There is no field on which these could be told apart. The data does not
-merely fail to distinguish them — it contains nothing that could.
+merely fail to distinguish them: it contains nothing that could.
 
 ## Decision
 
@@ -75,12 +75,12 @@ properties:
 
 | rule | groups | absorbed | rows removed | biggest |
 |---|---|---|---|---|
-| A — suburb + beds + price | 2,577 | 23,273 | 20,696 | 240 |
-| B — + title, location, baths, size | 3,430 | 16,722 | **13,292** | 239 |
+| A: suburb + beds + price | 2,577 | 23,273 | 20,696 | 240 |
+| B: + title, location, baths, size | 3,430 | 16,722 | **13,292** | 239 |
 
 The largest group moves 240 → 239. The floods are byte-identical anyway,
 so the strict rule catches effectively all of the problem while **declining
-7,404 merges** the loose rule would have made — precisely the cases where
+7,404 merges** the loose rule would have made: precisely the cases where
 price and bed count coincided but the advert text did not, which is where
 two different buildings would hide. A round number like 7,000,000 recurs
 across Westlands blocks; text does not.
@@ -106,7 +106,7 @@ Group size is itself evidence, and the risk is not spread evenly:
 | 26+ | **50** | 4,098 | **30.8%** |
 
 Fifty groups produce 31% of the entire collapse. At that size the
-development reading is the only plausible one — nobody owns 234 independent
+development reading is the only plausible one: nobody owns 234 independent
 flats that coincide on eight fields. At size 2 the reading is genuinely
 ambiguous, **and ambiguous in both directions**: a pair may be two
 different flats, or one flat photographed by two agents, which is a true
@@ -114,7 +114,7 @@ duplicate that *should* merge. Nothing in the data separates those, so the
 rule declines to guess.
 
 Pairs and triples are therefore left alone. That forgoes 23% of the
-possible collapse and removes most of the false-merge exposure — the same
+possible collapse and removes most of the false-merge exposure: the same
 trade the scorer makes at its review tier, and the same principle: merge
 the unambiguous, concede the marginal, never let one signal decide alone.
 
@@ -131,7 +131,7 @@ results page. That, not the lost row, is the real cost of a wrong merge:
 the buyer never sees the second flat's interior.
 
 Rendering all member images on the property page reduces a false merge to
-"two similar flats presented on one page, both linking out" — which for
+"two similar flats presented on one page, both linking out", which for
 adverts that were indistinguishable in the results list is arguably better
 than two identical-looking rows. The page already lists every member advert
 with its own source link, price and stale marker; only the images are
@@ -145,8 +145,8 @@ Rejected on two grounds.
 **It shows information the buyer cannot use.** In this market unit 2A
 versus 2B carries nothing a buyer can act on; bed count and price are the
 decision. Quantity is worth knowing, but it is properly learned when an
-agent states it — through a claimed listing, or a developer posting
-directly — not inferred by us.
+agent states it (through a claimed listing, or a developer posting
+directly), not inferred by us.
 
 **The count would not be true.** 21 adverts may be 21 units, or one unit
 posted 21 times by an agent working the portal's ordering. Nothing in the
@@ -159,24 +159,24 @@ to stop.
 | | before | merge all | **merge 4+** |
 |---|---|---|---|
 | active properties | 35,088 | 21,796 | **~24,876** |
-| rows removed | — | 13,292 (38%) | **10,212 (29%)** |
+| rows removed | - | 13,292 (38%) | **10,212 (29%)** |
 
 The figures below assume the threshold of 4.
 
 - **The public headline changes and must be reworded, not just renumbered.**
-  54,269 active adverts now reduce to roughly 24,900 results — against the
+  54,269 active adverts now reduce to roughly 24,900 results, against the
   37% quoted today. But it would be wrong to call all of that
   "duplicates removed": a 234-unit development collapsing to one row is not
   233 repeated adverts. The honest form is **"54,000 adverts become 21,800
   distinct results"**, with same-advert duplication quoted separately where
   a specific number is needed. Fix this on the homepage and anywhere else
-  the figure is quoted, at the same time as the rebuild — it is currently understated, which
+  the figure is quoted, at the same time as the rebuild. It is currently understated, which
   is the safe direction, but it is wrong either way.
 - **Reversible.** This is a grouping rule re-derived from listings on every
   rebuild, not a durable human decision of the kind ADR 0007 protects.
   Changing the key changes the output on the next run; nothing is lost.
 - **The review queue is unaffected.** Those pairs are cross-source
-  candidates scored 0.36–0.50 — a different axis. This rule neither clears
+  candidates scored 0.36–0.50: a different axis. This rule neither clears
   nor grows the queue.
 - **Multi-source properties are barely touched:** only 180 groups contain a
   property with `source_count > 1`, and merging can only raise
@@ -195,7 +195,7 @@ The figures below assume the threshold of 4.
 ## Re-measured 2026-09-02, after the BRK re-platform
 
 BuyRentKenya moved to a new stack on 1 September and removed a large
-amount of inventory in the process — including all 551 "1 Bed Apartment
+amount of inventory in the process, including all 551 "1 Bed Apartment
 with En Suite in Kilimani" adverts that were the worst example in this
 document. They are now delisted or stale, correctly caught by the stale
 pass. The problem partly solved itself.
@@ -204,7 +204,7 @@ pass. The problem partly solved itself.
 |---|---|---|
 | active properties | 35,088 | 34,142 |
 | rows removed at threshold 4 | 10,212 | **8,835** |
-| groups at threshold 4 | — | 848 |
+| groups at threshold 4 | - | 848 |
 | biggest group | 239 | **114** |
 
 The largest group halved, but 8,835 rows is still **26% of the active
@@ -215,14 +215,14 @@ move again on the next full crawl.
 
 The wider lesson is worth keeping. Two of this ADR's motivating examples
 were removed by the source site within a week of being measured. Numbers
-taken from a live scraped corpus decay, and any figure quoted publicly —
-on the homepage or anywhere else — needs a date attached and a re-check
+taken from a live scraped corpus decay, and any figure quoted publicly,
+on the homepage or anywhere else, needs a date attached and a re-check
 before it is repeated.
 
 ## Investigated and rejected: collapsing on the shared image instead
 
 The Kilimani 1-bed landing page shows the same rendered interior repeated
-down the grid, which looked at first like a cheaper fix than this ADR —
+down the grid, which looked at first like a cheaper fix than this ADR:
 merge on the perceptual hash and be done.
 
 The shape is real. Those 223 listings are all BuyRentKenya, every one with
@@ -251,7 +251,7 @@ whole corpus rather than inside one filtered page:
 
 One image spanning four suburbs, three bed counts and a five-fold price
 range is an agency's generic render, not a photograph of a building.
-Merging on it would weld unrelated flats together — precisely what
+Merging on it would weld unrelated flats together: precisely what
 `CK_GROUP_CAP` prevents. The 3,807 figure is not a safe collapse, and the
 claim that the hash route is "higher confidence" than the text key was
 wrong.
@@ -261,7 +261,7 @@ signal: `hide_generic_images` blanked 11% of properties and was disabled
 after the groups turned out to be coherent developments; `CK_GROUP_CAP`
 exists because a shared logo welded unrelated properties; and now this.
 The recurring lesson is that **an image shared across many listings is
-evidence of an agency's publishing habits, not of the building** — which
+evidence of an agency's publishing habits, not of the building**, which
 is the same conclusion this ADR reaches from the other direction when it
 removes image similarity from the safeguard.
 
@@ -272,7 +272,7 @@ it.
 
 The rule is settled; its position is not, and the choice matters.
 
-`cluster_key` and the development key **cross-cut** — neither refines the
+`cluster_key` and the development key **cross-cut**: neither refines the
 other. Two adverts can share an image and price but carry different
 headlines, or share every word and differ in image. So a development group
 may span several step-2 cluster properties, and a sequential "step 2b" that
@@ -280,7 +280,7 @@ joins each group to the first `property_id` it finds would leave the rest
 unmerged, silently capping the collapse.
 
 The correct construction is **union-find over all three edge types at once**
-— step-1 scored pairs, shared `cluster_key`, shared development key — with
+(step-1 scored pairs, shared `cluster_key`, shared development key), with
 one property per connected component. Step 1 already builds union-find
 groups, so the machinery exists, and it matches the standing rule that
 dedup is evidence-weighted rather than a sequence of filters.

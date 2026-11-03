@@ -3,7 +3,7 @@ different listing rows.
 
 cluster_key catches exact re-posts (identical image URL + specs +
 price). This pass catches the re-upload case: same photo re-encoded
-under a NEW URL — perceptual hashes match, URLs don't.
+under a NEW URL: perceptual hashes match, URLs don't.
 
 Threshold is TIGHTER than cross-source (4 vs 8): within one source the
 same CDN pipeline served both copies, so true re-uploads sit at
@@ -32,7 +32,7 @@ def find_intra_matches(
     listings sharing the exact same image content under different URLs)
     as distance-0 candidates.
 
-    Hex strings are converted to ints ONCE up front — this loop is
+    Hex strings are converted to ints ONCE up front: this loop is
     O(n²) and P24 has ~10k+ distinct triples (~50M+ comparisons).
     """
     candidates = []
@@ -46,7 +46,7 @@ def find_intra_matches(
         # caller expands both sides by cluster_key and skips the diagonal,
         # so every price/bath variant of the same photo gets scored. The
         # old rep-vs-rest form let one representative comparison decide
-        # the fate of every listing sharing the image — if ids[0] and
+        # the fate of every listing sharing the image: if ids[0] and
         # ids[1] happened to share a cluster_key the entire group was
         # discarded, which is why "same photo, agent nudged the price"
         # never merged.

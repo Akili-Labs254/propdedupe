@@ -1,5 +1,5 @@
 -- Refresh-pipeline support. Run ONCE in the Supabase SQL Editor before
--- the first scripts/refresh.py run. Idempotent — safe to re-run.
+-- the first scripts/refresh.py run. Idempotent: safe to re-run.
 
 -- ── 1. status: backfill + default + guard ───────────────────────────
 -- Rows scraped before status handling existed have status NULL.
@@ -18,8 +18,8 @@ exception when duplicate_object then null;
 end $$;
 
 -- ── 2. price_history: capture every price change via trigger ────────
--- Trigger (not app code) so ANY writer — scraper upsert, manual fix,
--- future admin UI — records history. Fires on insert (first price) and
+-- Trigger (not app code) so ANY writer (scraper upsert, manual fix,
+-- future admin UI) records history. Fires on insert (first price) and
 -- on any update that changes price.
 
 create or replace function record_price_change()

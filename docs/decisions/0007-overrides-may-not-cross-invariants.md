@@ -1,9 +1,9 @@
-# 0007 — Manual overrides may relax heuristics, never invariants
+# 0007: Manual overrides may relax heuristics, never invariants
 
 **Status:** accepted (Phase 1, July 2026)
 
 ## Problem
-A live property page showed "KSh 165,000 – 33,000,000, 3–4 bed" — a
+A live property page showed "KSh 165,000 – 33,000,000, 3–4 bed": a
 Westlands rental (KSh 165k/month) welded to a Kiambu Road house for sale
 (KSh 33m). The two listings agreed on nothing: different category,
 suburb, beds, baths, price, and phashes **36 bits apart** against a
@@ -22,12 +22,12 @@ faithfully reapplied on every rebuild for a week.
 ## Root cause
 Review decisions override the scorer in two places. Only one is safe.
 
-1. **Candidate pairs** (`persist_dedup` ~L494/L587) — the decision flips
+1. **Candidate pairs** (`persist_dedup` ~L494/L587): the decision flips
    an existing pair's tier to `merged`/`dismissed`. Safe: the pair came
    through blocking, and blocking loops *per category*, so the pair is
    same-category by construction. The human overrides the score, not the
    partition.
-2. **Non-candidate pairs** (~L643) — merge decisions are unioned even
+2. **Non-candidate pairs** (~L643): merge decisions are unioned even
    when blocking didn't surface them this run. This branch is necessary:
    `matches` is wiped every rebuild, and a pair merged last week may not
    re-block this week (invalidated hashes, staled listing, windowed rent
@@ -57,20 +57,20 @@ Enforced at two layers:
 
 - `persist_dedup.py` skips cross-category merge decisions in the
   non-candidate branch and warns with the offending row's IDs.
-- `backend/db/review_guard.sql` — a `before insert or update` trigger on
+- `backend/db/review_guard.sql`: a `before insert or update` trigger on
   `review_decisions` raising on cross-category merges, so the row cannot
   be recorded at all. Defence at the write site, not just the read site.
 
 ## Blast radius
 1 bad property out of 31,155; 1 bad decision out of 116 merges. The
 offending row was deleted; the next full rebuild cleared the page. The
-narrowness is why it survived a week — the merge reapplied *identically*
+narrowness is why it survived a week: the merge reapplied *identically*
 every run, so it read as stable rather than corrupt.
 
 ## Residual
 The guard covers cross-category only. Same-category merges that are
 merely wrong (different suburb, >5× price gap) remain possible and are a
-judgement call, not an invariant breach — three such pairs from the same
+judgement call, not an invariant breach: three such pairs from the same
 July 19 session are flagged for manual re-review. If that class recurs,
 the answer is a confirmation step on high-divergence pairs in the batch
 UI, not a hard block: the decision rate (~1/second) is the real variable.

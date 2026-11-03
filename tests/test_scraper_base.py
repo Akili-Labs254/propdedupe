@@ -1,4 +1,4 @@
-"""Tests for is_end_of_pagination — the single decision that authorises
+"""Tests for is_end_of_pagination: the single decision that authorises
 stale detection to mark listings as removed.
 
 This function has now been wrong three times, in three different ways, and
@@ -11,7 +11,7 @@ false-delisting:
 
 The third one is the reason these tests exist. The ADR's table said 404/410;
 the code said `400 <= status < 500`. Nobody noticed the disagreement because
-nothing exercised it — until BuyRentKenya started refusing GitHub's runners
+nothing exercised it: until BuyRentKenya started refusing GitHub's runners
 and all three indexes reported a complete crawl of zero listings.
 
 The rule, stated once: **refusal is not absence.** Only "there is no such
@@ -49,7 +49,7 @@ def test_server_errors_do_not_end_the_crawl(status):
 
 
 def test_transport_failures_fail_closed():
-    """No HTTP status at all — a timeout, a DNS failure, a reset. We learned
+    """No HTTP status at all: a timeout, a DNS failure, a reset. We learned
     nothing about where the list ends."""
     assert is_end_of_pagination(requests.Timeout("read timed out")) is False
     assert is_end_of_pagination(requests.ConnectionError("reset")) is False
@@ -67,6 +67,6 @@ def test_exception_with_response_but_no_status():
 
 def test_end_of_list_statuses_is_explicit_and_small():
     """A guard on the guard. Widening this set is a decision that needs a
-    reason in the ADR, not a quiet boundary change — the last time it was a
+    reason in the ADR, not a quiet boundary change: the last time it was a
     range, it silently included every 4xx."""
     assert END_OF_LIST_STATUSES == frozenset({404, 410})

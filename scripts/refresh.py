@@ -6,12 +6,12 @@ runnable on its own for debugging.
 Stages (in --all order):
   1. scrape   Both scrapers. save_listings() upserts on (source_id,
               source_listing_id), bumps last_seen, resets status to active.
-  2. hashes   Incremental hash backfill — only listings with an image_url
+  2. hashes   Incremental hash backfill, only listings with an image_url
               but no image_phash (i.e. new since last run). NOT the full
               13k-image re-hash that backfill_all_hashes does.
   3. stale    Flip statuses per (source, category): active listings not
               seen this run → stale; stale listings not seen for
-              DELIST_DAYS → delisted. GUARDED three ways — see
+              DELIST_DAYS → delisted. GUARDED three ways: see
               stage_stale. The important one: a category whose scrape
               stopped at its page cap is skipped entirely, because
               "not seen" only means "removed" if we looked at the whole
@@ -74,7 +74,7 @@ def stage_check(db):
         for st in STALE_STATUSES:
             n = count_listings(db, source_id=sid, status=st)
             parts.append(f"{st}={n}")
-        # status=NULL rows predate status handling — need the SQL backfill
+        # status=NULL rows predate status handling: need the SQL backfill
         null_status = total - sum(
             count_listings(db, source_id=sid, status=st)
             for st in STALE_STATUSES
@@ -101,7 +101,7 @@ def stage_scrape(db, max_pages=None, rent_max_pages=None, sources="both"):
     Returns {source_id: {"saved": int, "pre_active": int, "categories":
     {category: {"saved": int, "complete": bool, "pre_active": int}}}}.
 
-    rent_max_pages caps ONLY the rent category — free-tier disk can't
+    rent_max_pages caps ONLY the rent category: free-tier disk can't
     hold the full P24 rental corpus (500MB tier), so we load the first N
     pages. The per-category "complete" flag is what stops that cap from
     corrupting stale detection: everything past the cap was never looked
@@ -135,7 +135,7 @@ def stage_scrape(db, max_pages=None, rent_max_pages=None, sources="both"):
                 n, complete = mod.run(max_pages=cap, category=category)
             except Exception as e:
                 # A crash leaves the tail of the list unseen, so it is
-                # never "complete" — staling on a crashed scrape is how
+                # never "complete": staling on a crashed scrape is how
                 # you lose a source.
                 print(f"!! {name}/{category} scrape crashed: {e}")
                 n, complete = 0, False
@@ -205,7 +205,7 @@ def _flip_status_chunked(db, sid, category, from_status, new_status,
                          before_field, before_value, chunk=1000):
     """Flip listing status in id-batches so no single request exceeds
     Supabase's ~60s API-gateway upstream timeout. A full-table UPDATE
-    504s on the free tier — and a windowed P24 rescrape can stale
+    504s on the free tier, and a windowed P24 rescrape can stale
     thousands of out-of-window rows at once. Returns the count flipped.
 
     Scoped to one category because sale and rent are crawled to different
@@ -236,14 +236,14 @@ def stage_stale(db, run_start, scrape_results=None, force=False):
     to different depths and a decision valid for one is invalid for the
     other. Three guards, in order:
 
-    1. Source not scraped this run (CI does BRK only — P24 blocks
+    1. Source not scraped this run (CI does BRK only: P24 blocks
        datacenter IPs). No "seen this run" signal at all, so staling
        would condemn its entire active set.
     2. Category's scrape did not reach the end of pagination. Under a
        page cap, "not seen" means "not looked at", not "removed". This
        guard is the fix for 2026-08-12, when a capped rent scrape staled
-       7,240 live P24 rentals — 41% of everything then marked gone.
-    3. Category saved < MIN_SCRAPE_RATIO of its own prior active count —
+       7,240 live P24 rentals: 41% of everything then marked gone.
+    3. Category saved < MIN_SCRAPE_RATIO of its own prior active count:
        a broken parser, or a block that happened to look like the end of
        pagination.
 
@@ -306,7 +306,7 @@ def stage_dedup():
     # stock placeholders (auction boards, "no photo available") and caught
     # 523 properties while the corpus was P24 houses.
     #
-    # After ingesting BRK apartments-for-sale it hit 3,733 — 11% of all
+    # After ingesting BRK apartments-for-sale it hit 3,733: 11% of all
     # active properties left with no image. The groups are not
     # placeholders: e.g. 212 properties, every one 4-bed, all 13-20M,
     # across Kileleshwa/Kilimani/Lavington (three adjacent suburbs). A
@@ -326,7 +326,7 @@ def stage_dedup():
     # range? The schema already supports that (price_min/price_max,
     # beds_min/beds_max). Tracked in docs/product-backlog.md.
     #
-    # If it is ever re-enabled, the threshold is not the fix — the rule is
+    # If it is ever re-enabled, the threshold is not the fix: the rule is
     # wrong in kind, not degree. Price/bed coherence separates a
     # placeholder from a development; property count does not.
     print("  (generic-image pass disabled — see comment / product-backlog)")
@@ -404,7 +404,7 @@ def main():
 
     print(f"\nRun finished ({datetime.now(timezone.utc).isoformat()}).")
 
-    # Exit non-zero if any source/CATEGORY saved NOTHING — a dead parser
+    # Exit non-zero if any source/CATEGORY saved NOTHING: a dead parser
     # or blocked IP must alert (CI fails the job and emails), not shrug.
     # Per-category, because P24 once saved 21 sale + 0 rent and a
     # per-source total of 21 sailed through green. The <50% stale guard

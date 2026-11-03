@@ -2,7 +2,7 @@
 
 P24 dropped the `content` attribute from span.p24_price around 26 August
 2026 and moved the value into the element's text. The parser read only the
-attribute, so it returned None for every listing — 10,083 sale listings and
+attribute, so it returned None for every listing: 10,083 sale listings and
 ~30,000 rentals lost their price over two scrapes.
 
 Nothing errored. The listings still parsed, still had titles, beds, images
@@ -32,7 +32,7 @@ def test_prices_parse(text, expected):
 
 def test_non_breaking_spaces():
     """P24 separates digit groups with NBSP. A character class that only
-    covers ordinary spaces silently truncates the number — this bit us once
+    covers ordinary spaces silently truncates the number: this bit us once
     already in probe_depth.py."""
     assert parse_price_text("KSh 145 000 000") == 145000000.0
     assert parse_price_text("KSh 12 500 000") == 12500000.0

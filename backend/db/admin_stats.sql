@@ -1,5 +1,5 @@
 -- Admin stats views + generic-image hiding.
--- Run ONCE in the Supabase SQL Editor. Idempotent — safe to re-run.
+-- Run ONCE in the Supabase SQL Editor. Idempotent: safe to re-run.
 
 -- ── 1. Dedup rate per category (the "how bad are the dupes" number) ──
 create or replace view dedup_stats as

@@ -1,10 +1,10 @@
-# 0001 — Architecture & stack
+# 0001: Architecture & stack
 
 **Status:** accepted (Phase 0)
 
 ## Decision
-A single repo with three loosely-coupled Python components — **scraper → dedup →
-API** — over one PostgreSQL database (Supabase), feeding a thin frontend.
+A single repo with three loosely-coupled Python components (**scraper → dedup →
+API**) over one PostgreSQL database (Supabase), feeding a thin frontend.
 
 ## Why
 - Each component can be run and tested on its own.
@@ -17,7 +17,7 @@ API** — over one PostgreSQL database (Supabase), feeding a thin frontend.
   rendered, so no browser automation (Playwright) is needed.
 - **Matching:** imagehash (perceptual hashing). rapidfuzz was planned for
   title similarity but never needed.
-- **API:** FastAPI — typed, with auto-generated Swagger docs for free.
+- **API:** FastAPI, typed, with auto-generated Swagger docs for free.
 - **Database:** PostgreSQL via Supabase (plays to existing SQL strength).
 - **Frontend:** deferred; thin by design.
 

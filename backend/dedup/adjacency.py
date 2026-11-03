@@ -6,10 +6,10 @@ the scorer needs to know they border each other (score ~0.3) rather than
 treating them as completely different locations (score 1.0).
 
 TWO LAYERS:
-1. Name normalization — strips prefixes ("Off", "Near", "Along"), collapses
+1. Name normalization: strips prefixes ("Off", "Near", "Along"), collapses
    road variants ("Rd"→"Road"), lowercases, and maps known aliases to their
    canonical P24 suburb name.
-2. Adjacency graph — which suburbs physically border each other, built from:
+2. Adjacency graph, which suburbs physically border each other, built from:
    - P24 address hierarchy (e.g. "Kitisuru, Runda, Nairobi" → Runda nests
      under Kitisuru area)
    - Nairobi sub-county/ward groupings (administrative proximity)
@@ -36,7 +36,7 @@ from typing import Optional
 # Or "Ngong Road" vs "Ngong Rd". Normalization collapses these to one
 # canonical form before the adjacency lookup happens.
 
-# Prefixes that agents prepend to suburb names — stripped because
+# Prefixes that agents prepend to suburb names: stripped because
 # "Off Kiambu Road" IS Kiambu Road for dedup purposes.
 _STRIP_PREFIXES = re.compile(
     r'^(off|near|along|opposite|behind|next\s+to|adjacent\s+to)\s+',
@@ -191,7 +191,7 @@ def normalize_suburb(raw: str) -> str:
 
     # Commas are word boundaries, not part of the name. BRK's re-platformed
     # cards give "Buruburu, Nairobi" where the old JSON-LD gave "Buruburu",
-    # and the prefix fallback below only matches on `suburb + " "` — so a
+    # and the prefix fallback below only matches on `suburb + " "`, so a
     # comma silently created a second, parallel suburb for every area:
     # 424 properties under "kilimani, nairobi" and 13 under "kilimani",
     # each with its own segment page and neither complete.
@@ -200,7 +200,7 @@ def normalize_suburb(raw: str) -> str:
 
     # Then drop the city/county qualifier now trailing the real name.
     # Looped, because "Runda, Nairobi, Kenya" stacks them. Never strips
-    # down to nothing — "nairobi cbd" keeps its head.
+    # down to nothing: "nairobi cbd" keeps its head.
     for _ in range(3):
         for qualifier in _CITY_QUALIFIERS:
             if name.endswith(' ' + qualifier):
@@ -225,7 +225,7 @@ def normalize_suburb(raw: str) -> str:
     name = _ALIASES.get(name, name)
 
     # Step 5 (was documented above but never implemented): if the name
-    # isn't a known suburb, check whether one is its PREFIX — catches
+    # isn't a known suburb, check whether one is its PREFIX: catches
     # street/estate-level locations like "Lavington Elmolo Drive" →
     # "lavington" without needing an alias per street. Longest suburb
     # first so "lower kabete ..." matches "lower kabete", not "kabete".
@@ -240,14 +240,14 @@ def normalize_suburb(raw: str) -> str:
 # ── Step 2: Adjacency graph ────────────────────────────────────────────
 #
 # HOW IT WORKS: each suburb maps to a set of its direct neighbors.
-# The graph is symmetric — if A is adjacent to B, B is adjacent to A.
+# The graph is symmetric: if A is adjacent to B, B is adjacent to A.
 # We define edges once and symmetrize with _build_adjacency().
 #
 # SCORING (in the scorer, not here):
 #   same suburb           → 0.0  (perfect match)
-#   adjacent suburbs      → 0.3  (nearby — plausible same property)
+#   adjacent suburbs      → 0.3  (nearby: plausible same property)
 #   same sub-county       → 0.5  (same general area)
-#   different / unknown   → 0.8  (penalize but don't veto — rule #8)
+#   different / unknown   → 0.8  (penalize but don't veto: rule #8)
 #
 # WHY NOT 1.0 FOR UNKNOWN: standing rule #5 says no single field may veto
 # a match. An unknown location pair could still be a real match (BRK might
@@ -266,7 +266,7 @@ _RAW_EDGES = [
     ('kilimani', 'ngong road'),      # Ngong Rd runs along Kilimani's south edge
     ('kilimani', 'valley arcade'),   # Valley Arcade sits between Kilimani and Lavington
     ('kilimani', 'nairobi cbd'),     # Kilimani is ~5km west of CBD
-    ('kileleshwa', 'lavington'),     # Adjacent — Kileleshwa between Lavington and Kilimani
+    ('kileleshwa', 'lavington'),     # Adjacent: Kileleshwa between Lavington and Kilimani
     ('kileleshwa', 'westlands'),     # Kileleshwa connects to Westlands
     ('lavington', 'valley arcade'),  # Valley Arcade borders Lavington
     ('lavington', 'muthangari'),     # Muthangari is adjacent to Lavington
@@ -287,17 +287,17 @@ _RAW_EDGES = [
     # ── Northwest / Kitisuru cluster ──
     # P24 address hierarchy confirms: Lower Kabete, Runda, Rosslyn all
     # show "Kitisuru" as parent area in address format.
-    ('kitisuru', 'loresho'),         # Adjacent — both in northwest Nairobi
+    ('kitisuru', 'loresho'),         # Adjacent: both in northwest Nairobi
     ('kitisuru', 'runda'),           # P24 hierarchy: Runda nests under Kitisuru
     ('kitisuru', 'lower kabete'),    # P24 hierarchy: Lower Kabete under Kitisuru
     ('kitisuru', 'nyari'),           # Nyari is part of the Kitisuru area
     ('kitisuru', 'kyuna'),           # Kyuna borders Kitisuru
     ('kitisuru', 'rosslyn'),         # P24 hierarchy: Rosslyn under Kitisuru
-    ('runda', 'gigiri'),             # Adjacent — both diplomatic/luxury area
+    ('runda', 'gigiri'),             # Adjacent: both diplomatic/luxury area
     ('runda', 'rosslyn'),            # Rosslyn borders Runda
     ('runda', 'redhill'),            # Redhill is north of Runda
     ('runda', 'ruaka'),              # Ruaka borders Runda to the north
-    ('gigiri', 'muthaiga'),          # Adjacent — both embassy area
+    ('gigiri', 'muthaiga'),          # Adjacent: both embassy area
     ('gigiri', 'peponi'),            # Peponi Road area borders Gigiri
     ('muthaiga', 'peponi'),          # Peponi is the Muthaiga/Parklands border area
     ('muthaiga', 'ridgeways'),       # Ridgeways borders Muthaiga
@@ -313,7 +313,7 @@ _RAW_EDGES = [
 
     # ── Karen / Langata cluster ──
     # Source: P24 address groupings, neighborhood guides
-    ('karen', 'langata'),            # Classic pairing — Karen is south of Langata
+    ('karen', 'langata'),            # Classic pairing: Karen is south of Langata
     ('karen', 'hardy'),              # Hardy is within the greater Karen area
     ('karen', 'kerarapon'),          # Kerarapon borders Karen to the south
     ('karen', 'ngong road'),         # Karen connects via Ngong Rd
@@ -324,12 +324,12 @@ _RAW_EDGES = [
     ('langata', 'mbagathi way'),     # Mbagathi Way area borders Langata
     ('langata', 'kibera'),           # Kibera borders Langata
     ('langata', 'woodley'),          # Woodley connects to Langata
-    ('langata', 'south c'),          # ← THIS WAS MISSING — caused false positives
+    ('langata', 'south c'),          # ← THIS WAS MISSING: caused false positives
 
     # ── South / Southeast cluster ──
-    ('south b', 'south c'),          # Adjacent — classic pairing
+    ('south b', 'south c'),          # Adjacent: classic pairing
     ('south c', 'nairobi west'),     # South C borders Nairobi West
-    ('south c', 'syokimau'),         # ← THIS WAS MISSING — caused false positives
+    ('south c', 'syokimau'),         # ← THIS WAS MISSING: caused false positives
     ('south c', 'mombasa road'),     # South C is along Mombasa Road
     ('south b', 'mombasa road'),     # South B is near Mombasa Road
     ('syokimau', 'mlolongo'),        # Adjacent along Mombasa Road corridor
@@ -341,7 +341,7 @@ _RAW_EDGES = [
     ('embakasi', 'utawala'),         # Utawala borders Embakasi
 
     # ── North / Thika Road corridor ──
-    ('garden estate', 'thome'),      # Adjacent — both off Thika Road
+    ('garden estate', 'thome'),      # Adjacent: both off Thika Road
     ('garden estate', 'ridgeways'),   # Ridgeways borders Garden Estate
     ('garden estate', 'mirema'),     # Mirema is near Garden Estate
     ('ridgeways', 'muthaiga'),       # Ridgeways borders Muthaiga
@@ -386,7 +386,7 @@ _RAW_EDGES = [
 
     # ── Runda ↔ Karen (separate clusters, NOT adjacent) ──
     # NOTE: these are deliberately NOT connected. They're ~15km apart.
-    # The session summary flagged Karen↔Runda false positives — the fix
+    # The session summary flagged Karen↔Runda false positives: the fix
     # is ensuring they DON'T share an edge, not adding one.
     # Similar modern houses in different areas should score as distinct.
 ]
@@ -413,29 +413,29 @@ def location_dissimilarity(loc_a: str, loc_b: str) -> float:
     """Score how far apart two suburb names are for dedup purposes.
 
     Returns:
-        0.0  — same suburb (after normalization)
-        0.3  — adjacent suburbs (share a physical border)
-        0.5  — both known but not adjacent (same city, far apart)
-        0.8  — one or both unknown (unmapped suburb name)
+        0.0: same suburb (after normalization)
+        0.3: adjacent suburbs (share a physical border)
+        0.5: both known but not adjacent (same city, far apart)
+        0.8: one or both unknown (unmapped suburb name)
 
     WHY THESE VALUES:
     - 0.0: identical location is strong evidence of same property
     - 0.3: adjacent is common for real duplicates (same house listed under
       two overlapping suburb names, e.g. "Lavington" vs "Kilimani")
-    - 0.5: same city but far apart — weak negative signal, not a veto
-    - 0.8: unknown — penalize but leave room for image/price signals
+    - 0.5: same city but far apart, weak negative signal, not a veto
+    - 0.8: unknown, penalize but leave room for image/price signals
       to override (standing rule #5: no single field vetoes)
     """
     norm_a = normalize_suburb(loc_a)
     norm_b = normalize_suburb(loc_b)
 
     if not norm_a or not norm_b:
-        return 0.8  # Missing data — unknown
+        return 0.8  # Missing data: unknown
 
     if norm_a == norm_b:
         return 0.0
 
-    # Check adjacency (symmetric — only need one direction)
+    # Check adjacency (symmetric, only need one direction)
     neighbors_a = ADJACENCY.get(norm_a, frozenset())
     if norm_b in neighbors_a:
         return 0.3
@@ -486,7 +486,7 @@ if __name__ == '__main__':
         ("Runda Nairobi Kenya", "runda"),
         ("Komarock", "koma rock"),
         ("Lower Kabate Ln", "lower kabete"),
-        # Garbage — should return something, won't match anything
+        # Garbage: should return something, won't match anything
         ("-00200", "-00200"),
     ]
     for raw, expected in tests:

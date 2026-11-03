@@ -1,4 +1,4 @@
-"""Short memorable paths for video CTAs — and the attribution for them.
+"""Short memorable paths for video CTAs, and the attribution for them.
 
 Someone watching a 12-second TikTok cannot be asked to remember
 "fikia.co.ke/apartments-for-rent/ngong-road/2-bedroom". They can remember
@@ -6,13 +6,13 @@ Someone watching a 12-second TikTok cannot be asked to remember
 
 The second job matters as much as the first: TikTok strips referrers, and
 viewers type the URL rather than clicking it, so referrer-based attribution
-is impossible — 767 video views produced 9 visits we could only guess at.
+is impossible: 767 video views produced 9 visits we could only guess at.
 Here THE PATH ITSELF IS THE TAG. Each code appends its own ?ref=, so
 GoatCounter separates "saw the 50k video" from plain direct traffic without
 needing a referrer at all.
 
 302, not 301: these are marketing links whose destination may change as
-inventory shifts, and browsers cache a 301 hard — anyone who watched an old
+inventory shifts, and browsers cache a 301 hard: anyone who watched an old
 video would be stranded on a stale destination forever.
 
 REGISTRATION: this router owns "/{code}" and MUST be included LAST in
@@ -48,6 +48,6 @@ def destination(code: str) -> str:
 def vanity(code: str):
     target = VANITY.get(code.lower())
     if not target:
-        # Unknown single-segment path — same 404 it would have got anyway.
+        # Unknown single-segment path: same 404 it would have got anyway.
         raise HTTPException(status_code=404, detail="Not found")
     return RedirectResponse(destination(code.lower()), status_code=302)

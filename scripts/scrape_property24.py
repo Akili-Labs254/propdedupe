@@ -26,12 +26,12 @@ from backend.db.save import save_listings
 # Free-tier headroom is ~205 MB, so apartments cannot be crawled to the
 # end. That matters beyond disk: `complete` is an AND across a category's
 # indexes, so adding a permanently-capped index would stop the whole sale
-# category from staling — and sale is the ONE P24 category that currently
+# category from staling, and sale is the ONE P24 category that currently
 # completes and stales correctly. Adding it would trade working stale
 # detection for a partial slice of inventory.
 #
 # When disk allows, add it with ?SortOrder=PriceAscending so a capped
-# crawl takes the cheapest listings — the sub-20M band we actually want —
+# crawl takes the cheapest listings, the sub-20M band we actually want,
 # rather than an arbitrary slice of P24's default ordering.
 CATEGORY_URLS = {
     "sale": [
@@ -41,7 +41,7 @@ CATEGORY_URLS = {
         "https://www.property24.co.ke/apartments-flats-to-rent-in-nairobi-p95",
     ],
 }
-SOURCE_ID = 2  # Property24 Kenya — second row inserted into sources
+SOURCE_ID = 2  # Property24 Kenya: second row inserted into sources
 HARD_PAGE_CAP = 6000         # runaway guard (P24 rent is thousands of pages)
 MAX_CONSECUTIVE_EMPTY = 2    # stop after this many empty pages in a row
 
@@ -114,7 +114,7 @@ def run(max_pages: Optional[int] = None,
     """Scrape every index in `category` and return (listings_saved, complete).
 
     complete is True only when EVERY index in the category ended
-    pagination on its own — an empty-page or 404 streak means we reached
+    pagination on its own: an empty-page or 404 streak means we reached
     the real end of that list. It is False when any index ran out of
     `cap`, because then part of the category was never looked at.
 
@@ -122,7 +122,7 @@ def run(max_pages: Optional[int] = None,
     evidence a listing was removed if we actually looked at the whole
     list; under a cap it just means we stopped early. Reporting
     complete=True after a capped run staled 7,240 live P24 rentals on
-    2026-08-12 — 41% of everything then marked gone. See ADR 0008.
+    2026-08-12: 41% of everything then marked gone. See ADR 0008.
 
     `cap` applies PER INDEX, not per category: two sale indexes with
     max_pages=1500 crawl up to 3,000 pages. Predictable per URL, but

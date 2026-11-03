@@ -1,8 +1,8 @@
-"""Web route tests — real HTTP requests against the app with a fake DB.
+"""Web route tests: real HTTP requests against the app with a fake DB.
 
 The fake Supabase client returns queued responses per table (popped in
 call order), so tests exercise the actual FastAPI routing, form parsing,
-template rendering, and redirect logic — the layers unit tests miss.
+template rendering, and redirect logic: the layers unit tests miss.
 (The empty-string form bug that 422'd every search lived exactly there.)
 
 Run: pytest tests/test_web.py
@@ -195,7 +195,7 @@ def test_suburb_from_slug_accepts_legacy_and_case():
 
 def test_multiword_segment_links_have_no_spaces(client, monkeypatch):
     """Regression: link builders dropped the raw suburb value into the
-    path, producing '/houses-for-sale/ngong road' — which Google indexed."""
+    path, producing '/houses-for-sale/ngong road', which Google indexed."""
     stats = dict(STATS, suburb="ngong road")
     use_db(monkeypatch, {
         "suburb_stats": [FakeResult([stats]),
@@ -253,7 +253,7 @@ def test_punctuated_suburb_resolves_via_cache(client, monkeypatch):
 
 def test_segment_below_threshold_serves_but_noindex(client, monkeypatch):
     """Regression: thin pages used to 404. Inventory crosses MIN_SEGMENT
-    constantly, so a page Google indexed at 5 properties 404'd at 4 — and
+    constantly, so a page Google indexed at 5 properties 404'd at 4, and
     our best search click landed on exactly that (city-park-drive, 2026-08).
     Now it serves with noindex."""
     use_db(monkeypatch, {
@@ -278,7 +278,7 @@ def test_healthy_segment_is_indexable(client, monkeypatch):
 
 
 def test_unknown_suburb_still_404s(client, monkeypatch):
-    """No stats row at all — the suburb doesn't exist. Must still 404,
+    """No stats row at all: the suburb doesn't exist. Must still 404,
     or every typo becomes a soft-200."""
     web_segments._SLUG_CACHE.clear()
     use_db(monkeypatch, {
@@ -512,7 +512,7 @@ def test_days_listed_refuses_junk_rather_than_raising():
 
 def test_days_listed_never_returns_negative():
     """Clock skew or a future first_seen must not render 'seen for -1
-    days' — return None and let the template hide the badge."""
+    days': return None and let the template hide the badge."""
     from datetime import datetime, timedelta, timezone
     from backend.web.routes import days_listed
     future = datetime.now(timezone.utc) + timedelta(days=3)
@@ -615,7 +615,7 @@ def test_vanity_redirects_with_ref(client, monkeypatch):
     itself has to carry the attribution."""
     use_db(monkeypatch, {})
     r = client.get("/50k", follow_redirects=False)
-    assert r.status_code == 302          # 302 not 301 — destination may change
+    assert r.status_code == 302          # 302 not 301: destination may change
     assert "ref=tt-50k" in r.headers["location"]
     assert r.headers["location"].startswith("/?category=rent")
 
@@ -642,7 +642,7 @@ def test_unknown_vanity_code_404s(client, monkeypatch):
 def test_every_vanity_code_resolves_and_has_a_unique_ref(client, monkeypatch):
     """A code is added per video, by hand, usually in a hurry the night
     before posting. Two codes sharing a ref tag would silently merge two
-    videos' traffic in GoatCounter and the mistake would be invisible —
+    videos' traffic in GoatCounter and the mistake would be invisible:
     the numbers would just be quietly wrong.
     """
     from backend.web.vanity import VANITY, destination

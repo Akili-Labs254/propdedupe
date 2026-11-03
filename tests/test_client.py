@@ -2,7 +2,7 @@
 
 Every web request calls get_client(). Un-cached, each one built a fresh
 client with its own httpx connection pool and SSL context, none of which
-were ever closed — they accumulated until the 512MB Render instance OOM'd.
+were ever closed: they accumulated until the 512MB Render instance OOM'd.
 Three crashes on 2026-08-07, roughly 7-8 hours apart, accelerating as
 traffic grew.
 
@@ -38,7 +38,7 @@ def test_same_args_reuse_one_client(monkeypatch):
 
 
 def test_different_timeouts_get_separate_clients(monkeypatch):
-    """Web uses 120s, the batch pipeline 600s — they must not share."""
+    """Web uses 120s, the batch pipeline 600s: they must not share."""
     _patch(monkeypatch)
     web = get_client(timeout=120)
     batch = get_client(timeout=600)

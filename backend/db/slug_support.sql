@@ -1,6 +1,6 @@
 -- Stable property identity (slugs) + bulk linking.
 -- Run ONCE in the Supabase SQL Editor before the next persist_dedup run.
--- Idempotent — safe to re-run.
+-- Idempotent: safe to re-run.
 
 -- ── 1. properties: slug (stable public URL) + status ────────────────
 -- slug survives dedup rebuilds via reconciliation in persist_dedup:
@@ -19,7 +19,7 @@ create index if not exists idx_properties_status on properties(status);
 -- slug 301-redirects to the new one (slug → slug, NOT slug → id: ids
 -- die on every rebuild, canonical slugs don't). Resolution may chain
 -- (A → B → C); the web layer follows up to 5 hops.
--- No FK to properties on purpose — this table must outlive rebuilds.
+-- No FK to properties on purpose: this table must outlive rebuilds.
 
 create table if not exists property_slugs (
     slug        text primary key,

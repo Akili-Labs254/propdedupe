@@ -1,7 +1,7 @@
 -- Crawl-date stamp on properties: first_seen = when the earliest member
 -- listing was first scraped. Powers "newest properties" sorting for both
 -- admin checks and the consumer homepage.
--- Run ONCE in the Supabase SQL Editor. Idempotent — safe to re-run.
+-- Run ONCE in the Supabase SQL Editor. Idempotent: safe to re-run.
 -- persist_dedup writes the column itself from now on; the UPDATE
 -- backfills the current build.
 

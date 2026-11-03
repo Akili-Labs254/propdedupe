@@ -49,7 +49,7 @@ def fetch_distinct_hashes(db, source_id: int,
             break
         for row in result.data:
             key = (row["image_phash"], row["image_ahash"], row["image_whash"])
-            # Empty string is the "image unfetchable" sentinel — it's
+            # Empty string is the "image unfetchable" sentinel: it's
             # NOT NULL, so it passes the DB filters. Skip any partial
             # or sentinel triple.
             if not all(key):

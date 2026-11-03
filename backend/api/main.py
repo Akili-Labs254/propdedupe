@@ -1,5 +1,5 @@
 """
-PropDeDupe API — serves deduplicated property listings.
+PropDeDupe API: serves deduplicated property listings.
 
 Run locally:
     uvicorn backend.api.main:app --reload --port 8000
@@ -38,7 +38,7 @@ from backend.web.segments import router as segments_router
 from backend.web.admin import router as admin_router
 from backend.web.vanity import router as vanity_router
 
-# Consumer HTML pages (/, /property/{slug}) — server-rendered for SEO
+# Consumer HTML pages (/, /property/{slug}): server-rendered for SEO
 app.include_router(web_router)
 app.include_router(segments_router)
 app.include_router(admin_router)
@@ -72,6 +72,6 @@ async def html_error_pages(request, exc):
 
 @app.get("/health")
 def health():
-    """Health check — confirms the API is running (moved from / when the
+    """Health check: confirms the API is running (moved from / when the
     consumer homepage took over the root URL)."""
     return {"status": "ok", "project": "PropDeDupe"}
