@@ -9,7 +9,7 @@ three things we kept guessing at:
   - how much disk a complete crawl would need
   - whether the next unlock is pruning, a paid tier, or narrowing scope
 
-Run from a residential IP — P24 serves 503s to datacenter ranges.
+Run from a residential IP: P24 serves 503s to datacenter ranges.
 
     python -m scripts.probe_depth
     python -m scripts.probe_depth --headroom-mb 205
@@ -25,6 +25,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from scripts import scrape_buyrentkenya as brk
+from backend.common import config
 from scripts import scrape_property24 as p24
 
 # Bytes per listing row including indexes, measured 2026-08-12:
@@ -33,12 +34,11 @@ BYTES_PER_LISTING = 4400
 FREE_TIER_MB = 500
 PER_PAGE = 20
 
-HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                         "AppleWebKit/537.36 (KHTML, like Gecko) "
-                         "Chrome/120.0 Safari/537.36"}
+# Same honest User-Agent as the scrapers. A probe is still a bot.
+HEADERS = {"User-Agent": config.USER_AGENT}
 
 # Match against extracted TEXT, never raw HTML. Both sites wrap the digits
-# in tags — "Showing <span>1 - 20</span> of <span>88 815</span>" — so a
+# in tags, "Showing <span>1 - 20</span> of <span>88 815</span>", so a
 # pattern anchored on the markup finds nothing, which is exactly how the
 # first version of this script failed on all six indexes.
 #
@@ -71,7 +71,7 @@ def extract_total(text: str):
 
 
 def label_for(url: str) -> str:
-    """Last two path segments — P24 encodes type in one, BRK in two."""
+    """Last two path segments: P24 encodes type in one, BRK in two."""
     parts = [p for p in urlparse(url).path.split("/") if p]
     return "/".join(parts[-2:])[:34]
 

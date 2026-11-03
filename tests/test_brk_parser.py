@@ -1,7 +1,7 @@
 """BuyRentKenya parser tests, against saved copies of the real markup.
 
 Written 2026-09-01, the night BRK re-platformed. The parser returned zero
-listings from every page and **all 113 existing tests still passed** —
+listings from every page and **all 113 existing tests still passed**:
 nothing exercised parse() against real HTML. That is the same gap that let
 the stale-detection bug through in August: the code that broke was the code
 without tests.
@@ -10,14 +10,16 @@ The fixtures are deliberately whole pages rather than trimmed snippets. A
 snippet only proves the parser handles what we already understood; the full
 page is what catches the next change we haven't imagined.
 
-Refresh them with:
+BuyRentKenya has refused automated clients since 2 Sep (ADR 0010), so
+these copies can't currently be refreshed. When it was possible:
     python - <<'EOF'
     import requests, pathlib
+    from backend.common import config
     for name, url in [
         ("brk_houses_for_sale.html", "https://www.buyrentkenya.com/houses-for-sale"),
         ("brk_flats_for_rent.html",  "https://www.buyrentkenya.com/flats-apartments-for-rent"),
     ]:
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
+        r = requests.get(url, headers={"User-Agent": config.USER_AGENT}, timeout=30)
         pathlib.Path("tests/fixtures", name).write_text(r.text, encoding="utf-8")
     EOF
 """
@@ -62,7 +64,7 @@ def test_sale_page_yields_listings(sale_listings):
 def test_rent_page_yields_listings(rent_listings):
     # Rent used to need a special case (its JSON-LD omitted the Product
     # url). Under the new markup neither category carries Product data at
-    # all, so both go through the same card path — assert it, don't assume.
+    # all, so both go through the same card path: assert it, don't assume.
     assert len(rent_listings) == 25
 
 
@@ -102,7 +104,7 @@ def test_price_is_null_never_zero(sale_listings):
 
 
 def test_description_label_is_not_used_as_title(sale_listings):
-    """Cards carry two <h3>s — a literal "Description" label and the real
+    """Cards carry two <h3>s: a literal "Description" label and the real
     title. Taking the first blindly names every listing "Description"."""
     assert all(l.title.strip().casefold() != "description"
                for l in sale_listings)
@@ -110,7 +112,7 @@ def test_description_label_is_not_used_as_title(sale_listings):
 
 def test_hero_image_is_not_the_agency_logo(sale_listings):
     """The first <img> in a card is the agent's badge. Hashing that would
-    weld an agency's whole portfolio into one property — the exact failure
+    weld an agency's whole portfolio into one property: the exact failure
     CK_GROUP_CAP exists to catch downstream.
 
     This failed on its first run: agency logos sit at
@@ -126,7 +128,7 @@ def test_hero_image_is_not_the_agency_logo(sale_listings):
 
 def test_hero_images_are_distinct_across_listings(sale_listings):
     """Twenty-five cards resolving to one image means branding is winning
-    again — a different mistake than the one above, same symptom."""
+    again: a different mistake than the one above, same symptom."""
     heroes = [l.image_urls[0] for l in sale_listings if l.image_urls]
     assert len(set(heroes)) >= len(heroes) - 2
 
@@ -197,7 +199,7 @@ def test_raises_when_json_ld_vanishes_but_cards_remain():
 
 def test_genuinely_empty_page_returns_empty_not_raises():
     """The end of pagination is a real, expected state and must stay
-    distinguishable from a broken parser — otherwise the crawl can never
+    distinguishable from a broken parser: otherwise the crawl can never
     terminate normally."""
     assert BuyRentKenyaScraper().parse("<html><body></body></html>") == []
 
