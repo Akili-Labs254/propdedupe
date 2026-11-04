@@ -154,18 +154,22 @@ def stage_scrape(db, max_pages=None, rent_max_pages=None, sources="both"):
 def stage_hashes(db):
     """Hash images only for listings that don't have hashes yet."""
     from scripts.backfill_all_hashes import compute_hashes
+    from backend.db.client import with_retry
 
     print("\n=== Incremental hash backfill ===")
     done = 0
     failed = 0
     while True:
-        batch = (db.table("listings")
-                 .select("id, image_url")
-                 .not_.is_("image_url", "null")
-                 .is_("image_phash", "null")
-                 .order("id")
-                 .range(0, 99)
-                 .execute())
+        # Served by idx_listings_unhashed (hash_backfill_index.sql). Without
+        # it this scans from the lowest id every batch and timed out (504)
+        # 5,000 rows in on 4 Nov 2026.
+        batch = with_retry(lambda: db.table("listings")
+                           .select("id, image_url")
+                           .not_.is_("image_url", "null")
+                           .is_("image_phash", "null")
+                           .order("id")
+                           .range(0, 99)
+                           .execute())
         if not batch.data:
             break
 
@@ -178,19 +182,22 @@ def stage_hashes(db):
         for url, ids in by_url.items():
             try:
                 hashes = compute_hashes(url)
-                db.table("listings").update(hashes).in_("id", ids).execute()
-                done += len(ids)
-                progress = True
             except Exception as e:
-                # Mark unfetchable images so we don't loop on them forever:
-                # empty-string phash = "tried, image gone" (excluded from
+                # Image unfetchable: mark it so we don't loop on it forever.
+                # Empty-string phash = "tried, image gone" (excluded from
                 # blocking since it can't match a real hash).
-                db.table("listings") \
-                    .update({"image_phash": ""}) \
-                    .in_("id", ids) \
-                    .execute()
+                with_retry(lambda ids=ids: db.table("listings")
+                           .update({"image_phash": ""})
+                           .in_("id", ids).execute())
                 failed += len(ids)
                 print(f"  Failed ({e}): {url[:80]}")
+                continue
+            # A database error here is NOT an image failure: retry it, and
+            # if it still fails, crash rather than mark a good image as gone.
+            with_retry(lambda ids=ids, hashes=hashes: db.table("listings")
+                       .update(hashes).in_("id", ids).execute())
+            done += len(ids)
+            progress = True
 
         if not progress and failed == 0:
             break  # safety: nothing happened this loop
@@ -349,8 +356,12 @@ def main():
                         help="scrape + hashes + stale + dedup")
     parser.add_argument("--max-pages", type=int, default=None,
                         help="limit pages per scraper (smoke tests)")
-    parser.add_argument("--rent-max-pages", type=int, default=None,
-                        help="cap ONLY the rent category (free-tier disk)")
+    # Default ON. 4 Nov 2026: a run without the flag scraped all 4,370 rent
+    # pages, added 45k rows and took the DB from ~300MB to 427MB of the
+    # 500MB free tier. Forgetting a flag must not be able to do that.
+    parser.add_argument("--rent-max-pages", type=int, default=1500,
+                        help="cap ONLY the rent category (free-tier disk). "
+                             "Default 1500; pass 0 for no cap (needs a paid tier)")
     parser.add_argument("--sources", choices=("both", "brk", "p24"),
                         default="both",
                         help="which sources to scrape (CI uses brk — "
@@ -365,6 +376,8 @@ def main():
     parser.add_argument("--force", action="store_true",
                         help="run stale pass even if scrape looks broken")
     args = parser.parse_args()
+    if args.rent_max_pages == 0:
+        args.rent_max_pages = None
 
     if not any((args.check, args.scrape, args.hashes, args.stale,
                 args.dedup, args.all)):

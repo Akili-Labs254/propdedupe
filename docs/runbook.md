@@ -16,19 +16,20 @@ laptop on a home connection.
    set -o pipefail
    LOG=logs/refresh-$(date +%Y%m%d-%H%M).log
    caffeinate -is python -u -m scripts.refresh --scrape --hashes --stale \
-       --sources p24 --rent-max-pages 1500 2>&1 | tee "$LOG"
+       --sources p24 2>&1 | tee "$LOG"
    echo "exit=$? finished $(date)" | tee -a "$LOG"
    ```
 
    `-is`, not `-i`: `-s` also blocks system sleep while on mains power.
    A dropped connection kills the hash stage (happened on 30 Sep).
    Deliberately not `--all`, so the site doesn't change while nobody is
-   watching.
+   watching. Rent is capped at 1,500 pages by default (free-tier disk, see
+   "Disk quota" below); `--rent-max-pages 0` lifts it, only on a paid tier.
 
 2. Check the log before going further:
 
    ```bash
-   grep -E "exit=|SKIPPING|complete=|403|Forbidden|→ stale" logs/refresh-*.log | tail -30
+   grep -E "exit=|SKIPPING|complete=|FAILURE|Forbidden|→ stale" "$LOG" | tail -30
    ```
 
    Also check the price fill rate for listings seen today. P24 prices
@@ -41,6 +42,10 @@ laptop on a home connection.
    python -u -m scripts.persist_dedup 2>&1 | tee logs/rebuild-$(date +%Y%m%d-%H%M).log
    ```
 
+Before step 3, check DB size (Supabase dashboard, or
+`select pg_size_pretty(pg_database_size(current_database()));`). The
+rebuild needs headroom; above ~420 MB of 500, trim first.
+
 If a run dies after scraping, resume with `--hashes`, then
 `--stale --stale-cutoff "<'Run started' line from that log>"`. Never a
 bare `--stale` (see below).
@@ -49,6 +54,7 @@ bare `--stale` (see below).
 
 ```bash
 # Full cycle in one go (scrape → hashes → stale → dedup). Hours.
+# Rent cap (1500 pages) applies by default.
 caffeinate -is python -u -m scripts.refresh --all --sources p24 2>&1 | tee logs/refresh.log
 
 # Read-only preflight / post-run sanity
@@ -91,6 +97,7 @@ python -m scripts.backfill_suburbs
 | `hash_invalidation.sql` | null hashes when a cover photo URL changes |
 | `rental_support.sql` | category columns (sale/rent partition), per-category suburb_stats |
 | `admin_stats.sql` | dedup_stats + most_duplicated views, hide_generic_images() |
+| `hash_backfill_index.sql` | partial index so the hash backfill query doesn't time out |
 
 All idempotent. VACUUM statements must run as single statements (the
 editor wraps multi-statement queries in a transaction).
@@ -103,9 +110,37 @@ after table bloat from repeated full-table rewrites. Fixed globally:
 slow down again: `vacuum (analyze) listings;` (single statement).
 
 **`ConnectionTerminated / GOAWAY`**: Supabase's proxy closes an HTTP/2
-connection after ~10k requests. Handled: `_with_retry` reconnects, and
-the link_listings RPC cut per-run request count ~100×. If seen
-elsewhere, wrap the call in `_with_retry`.
+connection after ~10k requests. Handled: `with_retry`
+(`backend/db/client.py`) reconnects, and the link_listings RPC cut
+per-run request count ~100×. If seen elsewhere, wrap the call in
+`with_retry`. Only wrap idempotent calls (upserts, keyed updates, selects).
+
+**`APIError` 502 / 503 / 504 from Cloudflare** (e.g. `JSON could not be
+generated`, `upstream request timeout`): the gateway in front of
+PostgREST failed, so it arrives as a postgrest `APIError`, not an httpx
+error, and the old retry let it through. A 502 killed the P24 sale scrape
+at page 252 on 3 Nov 2026. `with_retry` now retries these too; the scrape
+save, the category lookup and every hash-stage call are wrapped. A crash
+mid-scrape now prints `FAILURE: scrape crashed part-way`: pages before it
+are saved, re-run that source.
+
+A 504 that keeps coming back is a slow query, not a blip. On 4 Nov the
+hash backfill's "unhashed rows, by id" select timed out because it had
+no index and 45k new rows sat behind 90k hashed ones. Fixed by
+`hash_backfill_index.sql`. Retrying a slow query just times out again:
+find the query, add the index.
+
+**Disk quota (free tier, 500 MB)**: on 4 Nov 2026 a run without the rent
+cap scraped all 4,370 rent pages (91,725 listings, +45k new) and took the
+DB to 427 MB. The cap is now the default so that can't happen by
+forgetting a flag. Trimmed by deleting rent rows first seen after the
+scraper passed page 1500 (timestamp from the log), their price_history
+first, after checking nothing in matches / review_decisions / property
+links pointed at them; then `vacuum (analyze) listings;` and the same for
+price_history. Plain VACUUM makes the space reusable but
+`pg_database_size` stays the same; that's expected. Don't run
+VACUUM FULL near the quota: it rewrites the table and needs room for a
+second copy.
 
 **`permission denied for table X` (42501)**: new table missing grants.
 `grant select, insert, update, delete on public.X to service_role;`
