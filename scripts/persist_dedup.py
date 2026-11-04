@@ -18,7 +18,7 @@ from collections import defaultdict
 
 import httpx
 
-from backend.db.client import get_client
+from backend.db.client import get_client, with_retry
 from backend.dedup.scorer import score_pair
 from backend.dedup.slugs import SlugAllocator
 from backend.dedup.adjacency import normalize_suburb
@@ -408,16 +408,7 @@ def _with_retry(make_call, attempts=4):
     If you add a read, wrap it. The cost is one lambda; the cost of not
     doing it is the whole site.
     """
-    for attempt in range(attempts):
-        try:
-            return make_call()
-        except (httpx.HTTPError, ConnectionError) as e:
-            if attempt == attempts - 1:
-                raise
-            wait = 2 ** attempt
-            print(f"  transient network error ({type(e).__name__}), "
-                  f"retrying in {wait}s...")
-            time.sleep(wait)
+    return with_retry(make_call, attempts)
 
 
 def create_singleton_properties(db, alloc: SlugAllocator,

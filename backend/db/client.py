@@ -1,4 +1,8 @@
+import time
 from functools import lru_cache
+
+import httpx
+from postgrest.exceptions import APIError
 
 from supabase import create_client, Client, ClientOptions
 from backend.common.config import SUPABASE_URL, SUPABASE_KEY, SUPABASE_SERVICE_ROLE_KEY
@@ -46,3 +50,43 @@ def get_client(use_service_role: bool = True, timeout: int = 120) -> Client:
             storage_client_timeout=timeout,
         ),
     )
+
+
+# Gateway errors from Supabase's Cloudflare edge. postgrest raises these as
+# APIError (code 502/503/504), not httpx errors, so a retry that only caught
+# httpx.HTTPError let them straight through. On 2026-11-03 a single 502 killed
+# the P24 sale scrape 252 pages (~5,271 listings) in.
+_RETRYABLE_STATUS = {"502", "503", "504"}
+
+
+def _is_transient(e: Exception) -> bool:
+    if isinstance(e, (httpx.HTTPError, ConnectionError)):
+        return True
+    if isinstance(e, APIError):
+        return str(getattr(e, "code", "")) in _RETRYABLE_STATUS
+    return False
+
+
+def with_retry(make_call, attempts=4):
+    """Run a Supabase call, retrying on transient network and gateway errors.
+
+    make_call must BUILD AND EXECUTE the request (a lambda), so each retry
+    issues a fresh request.
+
+    RETRY SAFETY: anything wrapped in this MUST be idempotent. A lost response
+    is not a lost write: the server can commit and then have the connection die
+    before replying, so a retry can re-send a write that already landed. Use
+    upserts with on_conflict for writes (see persist_dedup's notes on the
+    August 2026 23505 crash).
+    """
+    for attempt in range(attempts):
+        try:
+            return make_call()
+        except Exception as e:
+            if not _is_transient(e) or attempt == attempts - 1:
+                raise
+            wait = 2 ** attempt
+            label = (f"HTTP {e.code}" if isinstance(e, APIError)
+                     else type(e).__name__)
+            print(f"  transient error ({label}), retrying in {wait}s...")
+            time.sleep(wait)

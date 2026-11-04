@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from backend.db.client import get_client
+from backend.db.client import get_client, with_retry
 import hashlib
 
 # Plausible price bands per category, in KES. Outside these a "price" is a
@@ -78,11 +78,11 @@ def _existing_categories(db, source_id: int, ids: list) -> dict:
         chunk = ids[i:i + 100]
         if not chunk:
             continue
-        res = (db.table("listings")
-               .select("source_listing_id, category")
-               .eq("source_id", source_id)
-               .in_("source_listing_id", chunk)
-               .execute())
+        res = with_retry(lambda chunk=chunk: db.table("listings")
+                         .select("source_listing_id, category")
+                         .eq("source_id", source_id)
+                         .in_("source_listing_id", chunk)
+                         .execute())
         for row in res.data:
             found[str(row["source_listing_id"])] = row["category"]
     return found
@@ -161,4 +161,7 @@ def save_listings(listings: list, source_id: int, category: str = "sale") -> Non
                   "the scrape URLs.")
 
     if rows:
-        db.table("listings").upsert(rows, on_conflict="source_id,source_listing_id").execute()
+        # Idempotent (on_conflict), so safe to retry after a lost response.
+        with_retry(lambda: db.table("listings")
+                   .upsert(rows, on_conflict="source_id,source_listing_id")
+                   .execute())

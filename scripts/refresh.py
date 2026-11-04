@@ -138,9 +138,11 @@ def stage_scrape(db, max_pages=None, rent_max_pages=None, sources="both"):
                 # never "complete": staling on a crashed scrape is how
                 # you lose a source.
                 print(f"!! {name}/{category} scrape crashed: {e}")
-                n, complete = 0, False
+                n, complete, crash = 0, False, f"{type(e).__name__}: {e}"
+            else:
+                crash = None
             per_category[category] = {"saved": n, "complete": complete,
-                                      "pre_active": cat_pre}
+                                      "pre_active": cat_pre, "crashed": crash}
             saved += n
         results[sid] = {"saved": saved, "pre_active": pre_active,
                         "categories": per_category}
@@ -411,14 +413,24 @@ def main():
     # already protected the DB either way.
     if scrape_results:
         names = {1: "BRK", 2: "P24"}
-        dead = []
+        dead, crashed = [], []
         for sid, res in scrape_results.items():
             for cat, info in res.get("categories", {}).items():
-                if info["saved"] == 0:
-                    dead.append(f"{names.get(sid, sid)}/{cat}")
+                label = f"{names.get(sid, sid)}/{cat}"
+                if info.get("crashed"):
+                    # Pages before the crash WERE saved; "saved 0" here only
+                    # means the run never returned a count.
+                    crashed.append(f"{label} ({info['crashed'][:120]})")
+                elif info["saved"] == 0:
+                    dead.append(label)
+        if crashed:
+            print("FAILURE: scrape crashed part-way for "
+                  f"{'; '.join(crashed)}. Pages before the crash were saved; "
+                  "re-run that source.")
         if dead:
             print(f"FAILURE: no listings saved for {', '.join(dead)} — "
                   "check parser/IP-blocking.")
+        if crashed or dead:
             sys.exit(1)
 
 
