@@ -47,8 +47,8 @@ Before step 3, check DB size (Supabase dashboard, or
 rebuild needs headroom; above ~420 MB of 500, trim first.
 
 If a run dies after scraping, resume with `--hashes`, then
-`--stale --stale-cutoff "<'Run started' line from that log>"`. Never a
-bare `--stale` (see below).
+`--stale --sources <what that run scraped> --stale-cutoff "<'Run started'
+line from that log>"`. Never a bare `--stale` (see below).
 
 ## Regular operations
 
@@ -179,6 +179,9 @@ default, check `.env` too, or print `config.USER_AGENT` before a run.
 cutoff defaults to the new invocation's start time and mass-stales
 everything scraped before it. Pass the original run's timestamp:
 `--stale-cutoff "<'Run started' line from the crashed log>"`.
+Also pass `--sources` matching what that run scraped (now enforced). On
+4 Nov 2026 a P24-only run resumed without it and staled all 12,252
+active BRK listings, because BRK hadn't been scraped since 2 Sep.
 
 ## Invariants (do not violate casually)
 - Python + SQL cluster_key formulas byte-identical.

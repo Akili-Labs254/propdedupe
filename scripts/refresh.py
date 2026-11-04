@@ -238,7 +238,8 @@ def _flip_status_chunked(db, sid, category, from_status, new_status,
     return total
 
 
-def stage_stale(db, run_start, scrape_results=None, force=False):
+def stage_stale(db, run_start, scrape_results=None, force=False,
+                sources="both"):
     """Flip active→stale (not seen this run) and stale→delisted (old).
 
     Runs per (source, category), because the two categories are crawled
@@ -263,7 +264,11 @@ def stage_stale(db, run_start, scrape_results=None, force=False):
     cutoff = run_start.isoformat()
     delist_cutoff = (run_start - timedelta(days=DELIST_DAYS)).isoformat()
 
+    wanted = {"both": {1, 2}, "brk": {1}, "p24": {2}}[sources]
     for sid, name in ((1, "BRK"), (2, "P24")):
+        if sid not in wanted:
+            print(f"  {name}: not in --sources — skipping stale pass.")
+            continue
         if scrape_results is not None and sid not in scrape_results:
             print(f"  {name}: not scraped this run — skipping stale pass.")
             continue
@@ -363,9 +368,11 @@ def main():
                         help="cap ONLY the rent category (free-tier disk). "
                              "Default 1500; pass 0 for no cap (needs a paid tier)")
     parser.add_argument("--sources", choices=("both", "brk", "p24"),
-                        default="both",
-                        help="which sources to scrape (CI uses brk — "
-                             "P24 blocks datacenter IPs)")
+                        default=None,
+                        help="which sources to scrape (default both; CI "
+                             "uses brk, P24 blocks datacenter IPs). "
+                             "REQUIRED with --stale when not scraping in "
+                             "the same run")
     parser.add_argument("--stale-cutoff", type=str, default=None,
                         help="ISO timestamp to use as the stale cutoff "
                              "instead of now — REQUIRED when resuming a "
@@ -383,6 +390,17 @@ def main():
                 args.dedup, args.all)):
         parser.print_help()
         sys.exit(1)
+
+    # Resuming --stale without a scrape has no record of which sources the
+    # crashed run covered. 4 Nov 2026: a P24-only run resumed with a bare
+    # --stale staled all 12k active BRK listings (last scraped 2 Sep).
+    # Make the caller say it.
+    scraping = args.all or args.scrape
+    if args.stale and not scraping and args.sources is None:
+        sys.exit("--stale without --scrape needs --sources (brk|p24|both): "
+                 "use the sources the crashed run scraped, or every source "
+                 "you haven't scraped since the cutoff gets staled.")
+    args.sources = args.sources or "both"
 
     db = get_client(timeout=600)
     run_start = datetime.now(timezone.utc)
@@ -412,7 +430,8 @@ def main():
         # now decides per category from the scraper's own "did I reach
         # the end" flag, which covers both caps and is strictly more
         # accurate than inspecting the CLI args.
-        stage_stale(db, cutoff, scrape_results, force=args.force)
+        stage_stale(db, cutoff, scrape_results, force=args.force,
+                    sources=args.sources)
 
     if args.all or args.dedup:
         stage_dedup()
