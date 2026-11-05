@@ -152,17 +152,21 @@ def _unlink_listings_chunked(db):
     A single full-table UPDATE (~48k rows) runs past the API gateway's
     ~60s upstream limit on the free tier and 504s: no client timeout
     helps, the gateway kills it. Batching keeps every request small and
-    fast. Each pass grabs the next `CLEAR_CHUNK` still-linked ids; the
-    filter shrinks as we null them, so we always fetch fresh rows.
+    fast. Keyset pagination (id > last): re-fetching "the first N still
+    linked" makes every pass walk past everything already unlinked, and
+    on 4-5 Nov 2026 that turned this step into four hours of timeouts.
     """
     total = 0
+    last = 0
     while True:
-        rows = _with_retry(lambda: db.table("listings").select("id")
+        rows = _with_retry(lambda last=last: db.table("listings").select("id")
                            .not_.is_("property_id", "null")
+                           .gt("id", last)
                            .order("id").limit(CLEAR_CHUNK).execute())
         ids = [r["id"] for r in rows.data]
         if not ids:
             break
+        last = ids[-1]
         _with_retry(lambda ids=ids: db.table("listings")
                     .update({"property_id": None}).in_("id", ids).execute())
         total += len(ids)
@@ -173,12 +177,16 @@ def _clear_table_chunked(db, table):
     """Delete every row from `table` in id-batches (same 60s-gateway
     reason as _unlink_listings_chunked: a full-table DELETE 504s)."""
     total = 0
+    last = 0   # keyset: deleted rows linger as dead index entries until
+               # vacuum, so "first N by id" slows down on every pass
     while True:
-        rows = _with_retry(lambda: db.table(table).select("id")
+        rows = _with_retry(lambda last=last: db.table(table).select("id")
+                           .gt("id", last)
                            .order("id").limit(CLEAR_CHUNK).execute())
         ids = [r["id"] for r in rows.data]
         if not ids:
             break
+        last = ids[-1]
         _with_retry(lambda ids=ids: db.table(table)
                     .delete().in_("id", ids).execute())
         total += len(ids)
@@ -204,27 +212,27 @@ def snapshot_slug_state(db) -> Dict[int, str]:
     """Capture {listing_id: current slug} BEFORE the rebuild clears
     everything: this is what lets slugs survive the rebuild."""
     pid_to_slug = {}
-    offset = 0
+    last = 0
     while True:
-        batch = _with_retry(lambda o=offset: db.table("properties")
+        batch = _with_retry(lambda last=last: db.table("properties")
                             .select("id, slug")
                             .not_.is_("slug", "null")
-                            .order("id").range(o, o + 999).execute())
+                            .gt("id", last).order("id").limit(1000).execute())
         if not batch.data:
             break
         for row in batch.data:
             pid_to_slug[row["id"]] = row["slug"]
         if len(batch.data) < 1000:
             break
-        offset += 1000
+        last = batch.data[-1]["id"]
 
     snapshot = {}
-    offset = 0
+    last = 0
     while True:
-        batch = _with_retry(lambda o=offset: db.table("listings")
+        batch = _with_retry(lambda last=last: db.table("listings")
                             .select("id, property_id")
                             .not_.is_("property_id", "null")
-                            .order("id").range(o, o + 999).execute())
+                            .gt("id", last).order("id").limit(1000).execute())
         if not batch.data:
             break
         for row in batch.data:
@@ -233,7 +241,7 @@ def snapshot_slug_state(db) -> Dict[int, str]:
                 snapshot[row["id"]] = slug
         if len(batch.data) < 1000:
             break
-        offset += 1000
+        last = batch.data[-1]["id"]
     return snapshot
 
 
@@ -281,11 +289,12 @@ def stored_snapshot_size(db) -> int:
 
 
 def resolve_slug_snapshot(live: Dict[int, str], stored_count: int,
-                          load_stored):
+                          load_stored, unlinked_ids=frozenset()):
     """Decide which slug map to use and whether to persist it.
 
     Returns (snapshot, should_persist, note). `load_stored` is a callable
-    so the decision is testable without a database.
+    so the decision is testable without a database. `unlinked_ids` are
+    listings that currently have no property (left by a crashed rebuild).
     """
     if not live:
         # Nothing live at all: the pre-existing recovery path.
@@ -306,24 +315,53 @@ def resolve_slug_snapshot(live: Dict[int, str], stored_count: int,
                 f"partial/post-crash state. Using {len(merged)} slugs "
                 "(stored + live) and NOT overwriting the stored copy.")
 
+    # Live looks healthy, but a crashed rebuild can still leave listings
+    # unlinked, so they're missing from live while the stored copy knows
+    # their slug. Fill ONLY those (not every stored id: listings that left
+    # the corpus legitimately should drop out of the copy). 5 Nov 2026: a
+    # rebuild died in the singleton step with 4,594 listings unlinked.
+    if stored_count and unlinked_ids:
+        stored = load_stored()
+        recovered = {k: stored[k] for k in unlinked_ids
+                     if k in stored and k not in live}
+        if recovered:
+            merged = dict(live)
+            merged.update(recovered)
+            return merged, True, (f"{len(live)} listings carry a slug, plus "
+                                  f"{len(recovered)} unlinked ones recovered "
+                                  "from the crash-safe copy")
     return live, True, f"{len(live)} listings carry a slug"
+
+
+def unlinked_listing_ids(db) -> set:
+    """Ids of listings with no property. Normally ~0 before a rebuild;
+    non-zero means the last rebuild crashed part-way."""
+    out, last = set(), 0
+    while True:
+        batch = _with_retry(lambda last=last: db.table("listings")
+                            .select("id").is_("property_id", "null")
+                            .gt("id", last).order("id").limit(1000).execute())
+        if not batch.data:
+            return out
+        out.update(r["id"] for r in batch.data)
+        last = batch.data[-1]["id"]
 
 
 def load_slug_snapshot_fallback(db) -> Dict[int, str]:
     """Recover the last crash-safe snapshot (rerun-after-crash path)."""
     out = {}
-    offset = 0
+    last = 0
     while True:
-        batch = _with_retry(lambda o=offset: db.table("slug_snapshot")
+        batch = _with_retry(lambda last=last: db.table("slug_snapshot")
                             .select("listing_id, slug")
-                            .order("listing_id").range(o, o + 999).execute())
+                            .gt("listing_id", last).order("listing_id").limit(1000).execute())
         if not batch.data:
             break
         for row in batch.data:
             out[row["listing_id"]] = row["slug"]
         if len(batch.data) < 1000:
             break
-        offset += 1000
+        last = batch.data[-1]["listing_id"]
     return out
 
 
@@ -422,21 +460,27 @@ def create_singleton_properties(db, alloc: SlugAllocator,
     """
     BATCH_SIZE = 100
     created = 0
+    last_id = 0
 
     while True:
-        # Always fetch offset 0: linking removes rows from this filter,
-        # so the next "first page" is always the next unprocessed batch.
-        batch = _with_retry(lambda: (
+        # Keyset pagination: start each page after the last id handled.
+        # This used to refetch "first 100 unlinked by id" every time, which
+        # makes Postgres walk past every already-linked row from id 1 on
+        # each batch. It got slower as it went and hit the gateway timeout
+        # (504) 43,000 singletons in on 5 Nov 2026.
+        batch = _with_retry(lambda last_id=last_id: (
             db.table("listings")
             .select("id, source_id, source_listing_id, status, first_seen, "
                     "category, title, price, location, bedrooms, baths, "
                     "size_sqm, image_url")
             .is_("property_id", "null")
+            .gt("id", last_id)
             .order("id")
             .range(0, BATCH_SIZE - 1)
             .execute()))
         if not batch.data:
             break
+        last_id = batch.data[-1]["id"]
 
         prop_rows = []
         for row in batch.data:
@@ -495,8 +539,9 @@ def main():
         except Exception:
             return {}
 
+    unlinked = unlinked_listing_ids(db) if stored_count else set()
     snapshot, should_persist, note = resolve_slug_snapshot(
-        live, stored_count, _load_stored)
+        live, stored_count, _load_stored, unlinked)
     print(f"  {note}")
 
     if should_persist:
@@ -878,25 +923,25 @@ def main():
 
     # Fetch all P24 listings with a cluster_key (paginated)
     all_p24 = []
-    offset = 0
+    last = 0
     BATCH_SIZE = 1000
     while True:
-        batch = _with_retry(lambda o=offset: db.table("listings")
+        batch = _with_retry(lambda last=last: db.table("listings")
                             .select("id, cluster_key, property_id, source_id, "
                                     "source_listing_id, status, first_seen, "
                                     "category, title, price, location, "
                                     "bedrooms, baths, size_sqm, image_url")
                             .eq("source_id", 2)
                             .not_.is_("cluster_key", "null")
-                            .order("id")
-                            .range(o, o + BATCH_SIZE - 1)
+                            .gt("id", last).order("id")
+                            .limit(BATCH_SIZE)
                             .execute())
         if not batch.data:
             break
         all_p24.extend(batch.data)
         if len(batch.data) < BATCH_SIZE:
             break
-        offset += BATCH_SIZE
+        last = batch.data[-1]["id"]
 
     print(f"  Fetched {len(all_p24)} P24 listings with cluster_key")
 
@@ -1066,18 +1111,18 @@ if __name__ == "__main__":
         # pre-crash snapshot is gone, so no inheritance in this mode.
         db = get_client(timeout=600)
         alloc = SlugAllocator({})
-        offset = 0
+        last = 0
         while True:
-            batch = _with_retry(lambda o=offset: db.table("properties")
+            batch = _with_retry(lambda last=last: db.table("properties")
                                 .select("slug")
                                 .not_.is_("slug", "null")
-                                .order("id").range(o, o + 999).execute())
+                                .gt("id", last).order("id").limit(1000).execute())
             if not batch.data:
                 break
             alloc._claimed.update(r["slug"] for r in batch.data)
             if len(batch.data) < 1000:
                 break
-            offset += 1000
+            last = batch.data[-1]["id"]
         n = create_singleton_properties(db, alloc)
         print(f"Created {n} singleton properties.")
     else:

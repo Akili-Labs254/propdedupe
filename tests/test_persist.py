@@ -115,3 +115,25 @@ def test_group_by_cluster_key_isolates_falsy_keys():
 
 def test_group_by_cluster_key_drops_unknown_ids():
     assert _group_by_cluster_key([1, 999], {1: {"cluster_key": "A"}}) == [[1]]
+
+
+# ── crashed rebuild left listings unlinked (5 Nov 2026) ──────────────
+
+def test_unlinked_listings_keep_their_stored_slug():
+    live = {i: f"live-{i}" for i in range(9_000)}
+    snap, persist, note = resolve_slug_snapshot(
+        live, 10_000, stored(10_000), unlinked_ids={9_500, 9_501, 20_000})
+    assert persist is True
+    assert snap[9_500] == "stored-slug-9500"   # recovered
+    assert 20_000 not in snap                  # unknown to stored: nothing to recover
+    assert snap[5] == "live-5"                 # live untouched
+    assert len(snap) == 9_002 and "recovered" in note
+
+
+def test_departed_listings_still_drop_out():
+    """Recovery is only for unlinked listings: stored ids that simply left
+    the corpus must not be kept forever."""
+    live = {i: f"live-{i}" for i in range(8_000)}
+    snap, _, _ = resolve_slug_snapshot(live, 10_000, stored(10_000),
+                                       unlinked_ids=set())
+    assert snap == live
