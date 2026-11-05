@@ -39,8 +39,21 @@ laptop on a home connection.
    the ~90 minutes it runs, see "Known gaps" below):
 
    ```bash
-   python -u -m scripts.persist_dedup 2>&1 | tee logs/rebuild-$(date +%Y%m%d-%H%M).log
+   caffeinate -is python -u -m scripts.persist_dedup 2>&1 | tee logs/rebuild-$(date +%Y%m%d-%H%M).log
    ```
+
+4. Vacuum the rebuilt tables, one statement at a time in the SQL editor:
+
+   ```sql
+   vacuum (analyze) properties;
+   vacuum (analyze) matches;
+   vacuum (analyze) slug_snapshot;
+   ```
+
+   The rebuild deletes and rewrites all three, so each run leaves about
+   60 MB of dead rows. Vacuuming makes that reusable by the next rebuild;
+   skip it and the next run grows the database instead. `listings` is too
+   big for the editor's timeout; autovacuum handles it.
 
 Before step 3, check DB size (Supabase dashboard, or
 `select pg_size_pretty(pg_database_size(current_database()));`). The
