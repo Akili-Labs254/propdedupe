@@ -23,7 +23,11 @@ Usage:
   python -m scripts.refresh --check                 # read-only preflight
   python -m scripts.refresh --scrape --max-pages 3  # smoke-test scrapers
   python -m scripts.refresh --all                   # the real thing
-  python -m scripts.refresh --hashes --stale --dedup  # resume after scrape
+  # resume a run that died after scraping (cutoff = its 'Run started' line;
+  # --categories = only those that logged complete=True, usually sale):
+  python -m scripts.refresh --hashes
+  python -m scripts.refresh --stale --sources p24 --categories sale \
+      --stale-cutoff "2026-11-24T17:26:43+00:00"
 
 NOTE: --dedup REBUILDS the properties table, so property IDs change every
 run. Fine while nothing public links to them; must be fixed (stable
@@ -151,45 +155,78 @@ def stage_scrape(db, max_pages=None, rent_max_pages=None, sources="both"):
 
 # ── stage: hashes (incremental) ──────────────────────────────────────
 
+# Pause between image downloads. The CDN shares an owner with the site we
+# scrape from the same home IP, so a 26,000-image burst is a good way to get
+# that IP blocked. 0.1s adds ~45 min to a full re-hash; worth it.
+HASH_DELAY_SECONDS = 0.1
+# This many transient failures in a row means the network is down, not
+# that the images are. Stop; a rerun of --hashes picks up where this left.
+MAX_TRANSIENT_STREAK = 5
+
+
 def stage_hashes(db):
-    """Hash images only for listings that don't have hashes yet."""
-    from scripts.backfill_all_hashes import compute_hashes
+    """Hash images only for listings that don't have hashes yet.
+
+    One forward pass by id (keyset), so an image that keeps failing
+    transiently is tried once per run, not once per batch for the rest
+    of the stage. Transient failures stay unhashed for the next run;
+    only genuinely gone/unreadable images are marked unfetchable.
+    """
+    import time
+    from scripts.backfill_all_hashes import compute_hashes, TransientImageError
     from backend.db.client import with_retry
 
     print("\n=== Incremental hash backfill ===")
     done = 0
-    failed = 0
+    failed = 0          # permanently unfetchable, marked ''
+    transient = 0       # left NULL for a later run
+    streak = 0
+    last_id = 0
     while True:
         # Served by idx_listings_unhashed (hash_backfill_index.sql). Without
         # it this scans from the lowest id every batch and timed out (504)
         # 5,000 rows in on 4 Nov 2026.
-        batch = with_retry(lambda: db.table("listings")
+        batch = with_retry(lambda last_id=last_id: db.table("listings")
                            .select("id, image_url")
                            .not_.is_("image_url", "null")
                            .is_("image_phash", "null")
+                           .gt("id", last_id)
                            .order("id")
-                           .range(0, 99)
+                           .limit(100)
                            .execute())
         if not batch.data:
             break
+        last_id = batch.data[-1]["id"]
 
         # Hash each distinct URL once, update all rows sharing it
         by_url = {}
         for row in batch.data:
             by_url.setdefault(row["image_url"], []).append(row["id"])
 
-        progress = False
         for url, ids in by_url.items():
             try:
                 hashes = compute_hashes(url)
+            except TransientImageError as e:
+                transient += len(ids)
+                streak += 1
+                print(f"  Transient ({e}), left for next run: {url[:80]}")
+                if streak >= MAX_TRANSIENT_STREAK:
+                    print(f"  {streak} transient failures in a row: the network "
+                          "looks down. Stopping the hash stage; rerun with "
+                          "--hashes to continue.")
+                    print(f"  Hashed {done} listings, {failed} marked "
+                          f"unfetchable, {transient} left unhashed.")
+                    return done
+                continue
             except Exception as e:
-                # Image unfetchable: mark it so we don't loop on it forever.
+                # Gone or unreadable: mark it so we don't loop on it forever.
                 # Empty-string phash = "tried, image gone" (excluded from
                 # blocking since it can't match a real hash).
                 with_retry(lambda ids=ids: db.table("listings")
                            .update({"image_phash": ""})
                            .in_("id", ids).execute())
                 failed += len(ids)
+                streak = 0
                 print(f"  Failed ({e}): {url[:80]}")
                 continue
             # A database error here is NOT an image failure: retry it, and
@@ -197,14 +234,13 @@ def stage_hashes(db):
             with_retry(lambda ids=ids, hashes=hashes: db.table("listings")
                        .update(hashes).in_("id", ids).execute())
             done += len(ids)
-            progress = True
+            streak = 0
+            if done % 500 < len(ids):
+                print(f"  {done} hashed so far...")
+            time.sleep(HASH_DELAY_SECONDS)
 
-        if not progress and failed == 0:
-            break  # safety: nothing happened this loop
-        if done and done % 500 < len(batch.data):
-            print(f"  {done} hashed so far...")
-
-    print(f"  Hashed {done} listings, {failed} marked unfetchable.")
+    print(f"  Hashed {done} listings, {failed} marked unfetchable, "
+          f"{transient} left unhashed (transient).")
     return done
 
 
@@ -239,7 +275,7 @@ def _flip_status_chunked(db, sid, category, from_status, new_status,
 
 
 def stage_stale(db, run_start, scrape_results=None, force=False,
-                sources="both"):
+                sources="both", categories=("sale", "rent")):
     """Flip active→stale (not seen this run) and stale→delisted (old).
 
     Runs per (source, category), because the two categories are crawled
@@ -259,6 +295,11 @@ def stage_stale(db, run_start, scrape_results=None, force=False,
 
     --force overrides 2 and 3, never 1: there is no cutoff that makes
     staling an unscraped source correct.
+
+    `categories` limits the pass. In resume mode (no scrape_results) there
+    is no record of which categories completed, so main() makes the caller
+    name them: rent is capped by default and never completes, and a resume
+    that staled it would mark every rental past the cap as gone.
     """
     print("\n=== Stale detection ===")
     cutoff = run_start.isoformat()
@@ -275,11 +316,14 @@ def stage_stale(db, run_start, scrape_results=None, force=False,
 
         # None in --stale resume mode, where the caller supplied an
         # explicit cutoff on purpose and takes responsibility for it.
-        categories = (scrape_results or {}).get(sid, {}).get("categories", {})
+        cat_info = (scrape_results or {}).get(sid, {}).get("categories", {})
 
         for category in ("sale", "rent"):
-            info = categories.get(category)
+            info = cat_info.get(category)
             label = f"{name}/{category}"
+            if category not in categories:
+                print(f"  {label}: not in --categories — skipping stale pass.")
+                continue
 
             if info is not None and not force:
                 if not info["complete"]:
@@ -380,8 +424,16 @@ def main():
                              "started' line from that run's log), else "
                              "everything scraped before the resume gets "
                              "wrongly staled")
+    parser.add_argument("--categories", choices=("sale", "rent", "both"),
+                        default=None,
+                        help="limit the stale pass. REQUIRED with --stale "
+                             "when not scraping in the same run: name only "
+                             "the categories whose crawl COMPLETED in the run "
+                             "you are resuming (usually just sale; rent is "
+                             "capped and never completes)")
     parser.add_argument("--force", action="store_true",
-                        help="run stale pass even if scrape looks broken")
+                        help="run the stale pass even if the scrape looks "
+                             "broken, and the rebuild even if it failed")
     args = parser.parse_args()
     if args.rent_max_pages == 0:
         args.rent_max_pages = None
@@ -401,6 +453,20 @@ def main():
                  "use the sources the crashed run scraped, or every source "
                  "you haven't scraped since the cutoff gets staled.")
     args.sources = args.sources or "both"
+
+    # Same reasoning, for categories. Resume mode has no "did this crawl
+    # complete" flag, so it would stale BOTH categories. 24 Nov 2026: a
+    # P24 run whose rent crawl died at page 861 (and rent is capped at
+    # 1,500 of ~4,300 pages anyway) was about to be resumed with --stale,
+    # which would have marked ~30,000 live rentals stale.
+    if args.stale and not scraping and args.categories is None:
+        sys.exit("--stale without --scrape needs --categories (sale|rent|both): "
+                 "name only the categories whose crawl COMPLETED in the run "
+                 "you are resuming. Check its log for 'complete=True'. Rent "
+                 "is capped by default, so this is almost always 'sale'.")
+    stale_categories = {"sale": ("sale",), "rent": ("rent",),
+                        "both": ("sale", "rent"),
+                        None: ("sale", "rent")}[args.categories]
 
     db = get_client(timeout=600)
     run_start = datetime.now(timezone.utc)
@@ -422,7 +488,9 @@ def main():
     if args.all or args.stale:
         cutoff = run_start
         if args.stale_cutoff:
-            cutoff = datetime.fromisoformat(args.stale_cutoff)
+            # Python 3.9's fromisoformat rejects a trailing "Z".
+            cutoff = datetime.fromisoformat(
+                args.stale_cutoff.strip().replace("Z", "+00:00"))
             print(f"Using explicit stale cutoff: {cutoff.isoformat()}")
         # No blanket --max-pages skip any more. It only ever covered
         # --max-pages and silently ignored --rent-max-pages, which is
@@ -431,39 +499,55 @@ def main():
         # the end" flag, which covers both caps and is strictly more
         # accurate than inspecting the CLI args.
         stage_stale(db, cutoff, scrape_results, force=args.force,
-                    sources=args.sources)
+                    sources=args.sources, categories=stale_categories)
 
+    failures = scrape_failures(scrape_results)
+    scrape_failed = bool(failures[0] or failures[1])
     if args.all or args.dedup:
-        stage_dedup()
+        if scrape_failed and not args.force:
+            # The rebuild clears and repopulates the live site. Don't do
+            # that on top of a scrape that just failed part-way.
+            print("\n=== Dedup SKIPPED: the scrape failed (see below). "
+                  "Fix it and rebuild separately, or pass --force. ===")
+        else:
+            # Never pass --force through: the rebuild's own input gate is
+            # overridden only by running persist_dedup --force directly.
+            stage_dedup()
 
     print(f"\nRun finished ({datetime.now(timezone.utc).isoformat()}).")
 
-    # Exit non-zero if any source/CATEGORY saved NOTHING: a dead parser
-    # or blocked IP must alert (CI fails the job and emails), not shrug.
-    # Per-category, because P24 once saved 21 sale + 0 rent and a
-    # per-source total of 21 sailed through green. The <50% stale guard
-    # already protected the DB either way.
-    if scrape_results:
-        names = {1: "BRK", 2: "P24"}
-        dead, crashed = [], []
-        for sid, res in scrape_results.items():
-            for cat, info in res.get("categories", {}).items():
-                label = f"{names.get(sid, sid)}/{cat}"
-                if info.get("crashed"):
-                    # Pages before the crash WERE saved; "saved 0" here only
-                    # means the run never returned a count.
-                    crashed.append(f"{label} ({info['crashed'][:120]})")
-                elif info["saved"] == 0:
-                    dead.append(label)
-        if crashed:
-            print("FAILURE: scrape crashed part-way for "
-                  f"{'; '.join(crashed)}. Pages before the crash were saved; "
-                  "re-run that source.")
-        if dead:
-            print(f"FAILURE: no listings saved for {', '.join(dead)} — "
-                  "check parser/IP-blocking.")
-        if crashed or dead:
-            sys.exit(1)
+    # Exit non-zero if any source/CATEGORY saved NOTHING or crashed: a dead
+    # parser or blocked IP must alert (CI fails the job and emails), not
+    # shrug. Per-category, because P24 once saved 21 sale + 0 rent and a
+    # per-source total of 21 sailed through green.
+    crashed, dead = failures
+    if crashed:
+        print("FAILURE: scrape crashed part-way for "
+              f"{'; '.join(crashed)}. Pages before the crash were saved; "
+              "re-run that source.")
+    if dead:
+        print(f"FAILURE: no listings saved for {', '.join(dead)} — "
+              "check parser/IP-blocking.")
+    if crashed or dead:
+        sys.exit(1)
+
+
+def scrape_failures(scrape_results):
+    """([crashed labels], [saved-nothing labels]) from stage_scrape."""
+    crashed, dead = [], []
+    if not scrape_results:
+        return crashed, dead
+    names = {1: "BRK", 2: "P24"}
+    for sid, res in scrape_results.items():
+        for cat, info in res.get("categories", {}).items():
+            label = f"{names.get(sid, sid)}/{cat}"
+            if info.get("crashed"):
+                # Pages before the crash WERE saved; "saved 0" here only
+                # means the run never returned a count.
+                crashed.append(f"{label} ({info['crashed'][:120]})")
+            elif info["saved"] == 0:
+                dead.append(label)
+    return crashed, dead
 
 
 if __name__ == "__main__":

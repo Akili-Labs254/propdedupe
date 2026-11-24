@@ -417,7 +417,7 @@ def link_batch(db, pairs: List[dict]):
         _with_retry(lambda c=chunk: db.rpc("link_listings", {"pairs": c}).execute())
 
 
-def _with_retry(make_call, attempts=4):
+def _with_retry(make_call, attempts=6):
     """Run a Supabase call, retrying on transient network errors.
 
     Supabase's proxy closes an HTTP/2 connection after ~10k requests
@@ -521,8 +521,75 @@ def create_singleton_properties(db, alloc: SlugAllocator,
     return created
 
 
-def main():
+# ── input gate: checked BEFORE anything is cleared ─────────────────
+#
+# The rebuild clears properties/matches first and only then rebuilds, so
+# once it starts, whatever it builds is what the site serves. Its inputs
+# have to be checked before that point.
+#
+# 24 Nov 2026: a P24 image-parser break left 26,008 active listings with no
+# image. A rebuild would have clustered 21,909 of them on beds/baths/price
+# alone (2,992 false properties, the biggest 155 unrelated rentals) and
+# taken their photos off the site. Nothing in the rebuild looked.
+#
+# Shares of ACTIVE listings. Normal levels on 24 Nov: no image 0%,
+# unhashed ~0% after the hash stage, no price ~1%.
+PREFLIGHT_LIMITS = {
+    "no_image": (0.05, "have no image"),
+    "unhashed": (0.05, "have an image but no hash (run refresh --hashes first)"),
+    "no_price": (0.10, "have no price"),
+}
+
+
+def input_health(db) -> dict:
+    """Counts of active listings with each problem. Exact counts, cheap."""
+    def count(build):
+        res = _with_retry(lambda: build().limit(1).execute())
+        return res.count or 0
+
+    def active():
+        return (db.table("listings").select("id", count="exact")
+                .eq("status", "active"))
+
+    return {
+        "active": count(active),
+        "no_image": count(lambda: active().is_("image_url", "null")),
+        "unhashed": count(lambda: active().not_.is_("image_url", "null")
+                          .is_("image_phash", "null")),
+        "no_price": count(lambda: active().is_("price", "null")),
+    }
+
+
+def preflight_problems(health: dict) -> List[str]:
+    """Human-readable reasons not to rebuild; empty when inputs look sane."""
+    active = health.get("active", 0)
+    if not active:
+        return ["there are no active listings at all"]
+    problems = []
+    for key, (limit, what) in PREFLIGHT_LIMITS.items():
+        n = health.get(key, 0)
+        if n / active > limit:
+            problems.append(f"{n:,} of {active:,} active listings "
+                            f"({n / active:.0%}) {what}; limit {limit:.0%}")
+    return problems
+
+
+def main(force: bool = False):
     db = get_client(timeout=600)  # bulk clears/writes run for minutes on free tier
+
+    print("Checking inputs before touching anything...")
+    health = input_health(db)
+    print(f"  active={health['active']:,} no_image={health['no_image']:,} "
+          f"unhashed={health['unhashed']:,} no_price={health['no_price']:,}")
+    problems = preflight_problems(health)
+    if problems:
+        for p in problems:
+            print(f"  PROBLEM: {p}")
+        if not force:
+            sys.exit("ABORTED before clearing anything: the inputs look broken "
+                     "(see PROBLEM lines). The live site is untouched. Fix the "
+                     "cause, or rerun with --force if you are sure.")
+        print("  --force given: rebuilding anyway.")
 
     # Snapshot slug state BEFORE clearing: rebuilt properties inherit
     # the slugs their member listings carried (stable public URLs).
@@ -582,9 +649,13 @@ def main():
     decisions = {}
     offset = 0
     while True:
+        # Ordered on the full pair: listing_a_id alone isn't unique, and
+        # .range() over a non-unique order can repeat or skip rows at page
+        # boundaries (standing rule). Harmless below 1,000 decisions.
         batch = _with_retry(lambda o=offset: db.table("review_decisions")
                             .select("listing_a_id, listing_b_id, decision")
                             .order("listing_a_id")
+                            .order("listing_b_id")
                             .range(o, o + 999)
                             .execute())
         if not batch.data:
@@ -1126,5 +1197,5 @@ if __name__ == "__main__":
         n = create_singleton_properties(db, alloc)
         print(f"Created {n} singleton properties.")
     else:
-        main()
+        main(force="--force" in sys.argv)
 

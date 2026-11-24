@@ -343,3 +343,113 @@ def test_hitting_the_cap_reports_incomplete(monkeypatch):
     saved, complete = p24.run(max_pages=3, category="rent")
     assert saved == 3
     assert complete is False
+
+
+def test_a_repeating_page_stops_the_crawl_incomplete(monkeypatch):
+    """If P24 answered out-of-range pages with a real page, the crawl
+    would run to HARD_PAGE_CAP (6,000 pages). Same ids twice = not paging."""
+    from types import SimpleNamespace
+    from scripts import scrape_property24 as p24
+
+    page = [SimpleNamespace(source_listing_id=str(i)) for i in range(20)]
+
+    class Stuck:
+        def fetch(self, url):
+            return "<html/>"
+
+        def parse(self, html):
+            return page
+
+    saved_pages = []
+    monkeypatch.setattr(p24, "Property24Scraper", lambda: Stuck())
+    monkeypatch.setattr(p24, "save_listings",
+                        lambda listings, *a, **k: saved_pages.append(listings))
+    saved, complete = p24.run(max_pages=50, category="sale")
+    assert len(saved_pages) == 1
+    assert complete is False
+
+
+def test_parser_out_of_date_stops_the_category(monkeypatch):
+    """A broken parser is not a network blip: the next page has the same
+    markup. It must surface as a crash (refresh marks it, never complete),
+    not as three 'server errors'."""
+    from scripts import scrape_property24 as p24
+    from backend.scraper.base import ParserOutOfDate
+
+    class Broken:
+        def fetch(self, url):
+            return "<html/>"
+
+        def parse(self, html):
+            raise ParserOutOfDate("no images on the page")
+
+    monkeypatch.setattr(p24, "Property24Scraper", lambda: Broken())
+    monkeypatch.setattr(p24, "save_listings", lambda *a, **k: None)
+    with pytest.raises(ParserOutOfDate):
+        p24.run(max_pages=10, category="rent")
+
+
+# ── resume mode must name its categories (24 Nov 2026) ─────────────────
+
+def test_categories_limit_the_stale_pass(flips):
+    refresh.stage_stale(FakeDB(), RUN_START, None, sources="p24",
+                        categories=("sale",))
+    assert staled(flips, 2, "sale")
+    assert not staled(flips, 2, "rent")
+
+
+def _run_main(monkeypatch, argv):
+    """Run refresh.main() with no DB; return the stages it reached."""
+    reached = []
+    monkeypatch.setattr(refresh, "get_client", lambda **k: object())
+    monkeypatch.setattr(refresh, "stage_stale",
+                        lambda *a, **k: reached.append(("stale", k.get("categories"))))
+    monkeypatch.setattr(refresh, "stage_hashes", lambda db: reached.append("hashes"))
+    monkeypatch.setattr(refresh, "stage_dedup", lambda **k: reached.append("dedup"))
+    monkeypatch.setattr(refresh.sys, "argv", ["refresh"] + argv)
+    refresh.main()
+    return reached
+
+
+def test_resume_stale_without_categories_is_refused(monkeypatch):
+    """No completeness record in resume mode: the caller must say which
+    categories finished, or capped rent gets staled wholesale."""
+    with pytest.raises(SystemExit) as info:
+        _run_main(monkeypatch, ["--stale", "--sources", "p24",
+                                "--stale-cutoff", "2026-11-24T17:26:43+00:00"])
+    assert "--categories" in str(info.value)
+
+
+def test_resume_stale_with_categories_runs_only_those(monkeypatch):
+    reached = _run_main(monkeypatch, ["--stale", "--sources", "p24",
+                                      "--categories", "sale",
+                                      "--stale-cutoff", "2026-11-24T17:26:43Z"])
+    assert reached == [("stale", ("sale",))]
+
+
+def test_dedup_runs_after_a_clean_scrape(monkeypatch):
+    def clean_scrape(db, **k):
+        return {2: {"saved": 20, "pre_active": 20, "categories": {
+            "sale": {"saved": 10, "complete": True, "pre_active": 10, "crashed": None},
+            "rent": {"saved": 10, "complete": False, "pre_active": 10, "crashed": None}}}}
+    monkeypatch.setattr(refresh, "stage_scrape", clean_scrape)
+    reached = _run_main(monkeypatch, ["--all", "--sources", "p24"])
+    assert "dedup" in reached
+
+
+def test_failed_scrape_does_not_reach_dedup(monkeypatch):
+    reached = []
+
+    def failed_scrape(db, **k):
+        return {2: {"saved": 10, "pre_active": 10, "categories": {
+            "rent": {"saved": 0, "complete": False, "pre_active": 10,
+                     "crashed": "ParserOutOfDate: no images"}}}}
+    monkeypatch.setattr(refresh, "stage_scrape", failed_scrape)
+    monkeypatch.setattr(refresh, "get_client", lambda **k: object())
+    monkeypatch.setattr(refresh, "stage_stale", lambda *a, **k: None)
+    monkeypatch.setattr(refresh, "stage_hashes", lambda db: None)
+    monkeypatch.setattr(refresh, "stage_dedup", lambda **k: reached.append("dedup"))
+    monkeypatch.setattr(refresh.sys, "argv", ["refresh", "--all", "--sources", "p24"])
+    with pytest.raises(SystemExit):
+        refresh.main()
+    assert reached == []

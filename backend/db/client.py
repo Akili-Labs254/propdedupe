@@ -67,7 +67,10 @@ def _is_transient(e: Exception) -> bool:
     return False
 
 
-def with_retry(make_call, attempts=4):
+# Six attempts back off 1+2+4+8+16 = ~31s. Four (~7s) was not enough to
+# ride out a laptop's wifi reconnecting: on 24 Nov 2026 a DNS failure
+# after the lid closed exhausted the retries and killed the hash stage.
+def with_retry(make_call, attempts=6):
     """Run a Supabase call, retrying on transient network and gateway errors.
 
     make_call must BUILD AND EXECUTE the request (a lambda), so each retry
