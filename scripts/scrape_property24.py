@@ -8,7 +8,7 @@ Run: python -m scripts.scrape_property24
 from datetime import datetime
 from typing import Optional, Tuple
 
-from backend.scraper.base import is_end_of_pagination
+from backend.scraper.base import ParserOutOfDate, is_end_of_pagination
 from backend.scraper.property24 import Property24Scraper
 from backend.db.save import save_listings
 
@@ -58,6 +58,7 @@ def _crawl_index(base_url: str, cap: int, category: str) -> Tuple[int, bool]:
     fail_streak = 0
     streak_is_end = True   # every failure so far was a 4xx
     complete = False
+    prev_ids = None        # listing ids on the previous page
 
     for page in range(1, cap + 1):
         url = base_url if page == 1 else f"{base_url}?Page={page}"
@@ -68,6 +69,11 @@ def _crawl_index(base_url: str, cap: int, category: str) -> Tuple[int, bool]:
             listings = scraper.parse(html)
             fail_streak = 0
             streak_is_end = True
+        except ParserOutOfDate:
+            # Not a network blip: the next page has the same markup.
+            # Stop the category so refresh reports it as a crash (never
+            # complete) before anything is saved.
+            raise
         except Exception as e:
             fail_streak += 1
             # A streak only means "end of list" if every failure in it
@@ -96,6 +102,20 @@ def _crawl_index(base_url: str, cap: int, category: str) -> Tuple[int, bool]:
                 complete = True
                 break
             continue
+
+        # A site that answers out-of-range ?Page= with a real page (the
+        # last one, or page 1) instead of an empty one would otherwise
+        # keep this loop going to HARD_PAGE_CAP: 6,000 pages, hours of
+        # re-saving the same rows. Same ids as the page before means we
+        # are not moving through the list. Stop, and fail closed.
+        ids = frozenset(getattr(l, "source_listing_id", None) for l in listings)
+        ids = ids - {None}
+        if ids and ids == prev_ids:
+            log(f"[P24/{category}] page {page} repeats page {page - 1}: "
+                "the site is not paging. Stopping; marking incomplete.")
+            complete = False
+            break
+        prev_ids = ids
 
         empty_streak = 0
         save_listings(listings, SOURCE_ID, category=category)

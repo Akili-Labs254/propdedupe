@@ -74,21 +74,37 @@ class BaseScraper:
         bursts from datacenter IPs with 503s that pass on retry).
         Hard errors (404 etc.) raise immediately so end-of-pagination
         detection still works.
+
+        Network failures (DNS, refused or dropped connections, timeouts)
+        get the same backoff. These scrapes run on a laptop on home wifi:
+        on 24 Nov 2026 the lid closed, DNS failed for a few seconds, and
+        three quick failures ended the rent crawl at page 861 of 1,500.
+        A blip of under ~100 seconds is now ridden out; a longer outage
+        still fails the page, and the crawl still fails closed.
         """
         last_resp = None
+        last_exc = None
         for extra_wait in (0, 10, 30, 60):
             if extra_wait:
-                print(f"  {last_resp.status_code} — backing off {extra_wait}s...")
+                why = (last_resp.status_code if last_resp is not None
+                       else type(last_exc).__name__)
+                print(f"  {why}: backing off {extra_wait}s...")
                 time.sleep(extra_wait)
             time.sleep(config.REQUEST_DELAY_SECONDS)
-            resp = self.session.get(url, timeout=30)
+            try:
+                resp = self.session.get(url, timeout=30)
+            except (requests.ConnectionError, requests.Timeout) as e:
+                last_exc, last_resp = e, None
+                continue
             if resp.status_code == 429 or resp.status_code >= 500:
-                last_resp = resp
+                last_resp, last_exc = resp, None
                 continue
             resp.raise_for_status()
             return resp.text
-        last_resp.raise_for_status()
-        return last_resp.text  # unreachable; keeps type-checkers calm
+        if last_resp is not None:
+            last_resp.raise_for_status()
+            return last_resp.text  # unreachable; keeps type-checkers calm
+        raise last_exc
 
     def parse(self, html: str) -> list[ScrapedListing]:
         """Each source implements this. Returns the listings from one page."""

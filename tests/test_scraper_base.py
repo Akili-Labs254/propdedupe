@@ -70,3 +70,78 @@ def test_end_of_list_statuses_is_explicit_and_small():
     reason in the ADR, not a quiet boundary change: the last time it was a
     range, it silently included every 4xx."""
     assert END_OF_LIST_STATUSES == frozenset({404, 410})
+
+
+# ── fetch(): riding out a short network drop ────────────────────────────
+#
+# 24 Nov 2026: the laptop lid closed mid-crawl, DNS failed for a few
+# seconds, and three quick failures ended the rent crawl at page 861 of
+# 1,500. fetch() retried 429/5xx with backoff but not network errors.
+
+import backend.scraper.base as base_mod
+from backend.scraper.base import BaseScraper
+
+
+class _Resp:
+    def __init__(self, status, text="ok"):
+        self.status_code = status
+        self.text = text
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            r = requests.Response()
+            r.status_code = self.status_code
+            raise requests.HTTPError(f"{self.status_code}", response=r)
+
+
+class _Session:
+    def __init__(self, outcomes):
+        self.outcomes = list(outcomes)
+        self.calls = 0
+        self.headers = {}
+
+    def get(self, url, timeout=None):
+        self.calls += 1
+        o = self.outcomes.pop(0)
+        if isinstance(o, Exception):
+            raise o
+        return o
+
+
+@pytest.fixture
+def no_sleep(monkeypatch):
+    monkeypatch.setattr(base_mod.time, "sleep", lambda s: None)
+
+
+def test_dns_blip_is_ridden_out(no_sleep):
+    s = _Session([requests.ConnectionError("Failed to resolve"),
+                  requests.ConnectionError("Failed to resolve"),
+                  _Resp(200, "page")])
+    assert BaseScraper(session=s).fetch("http://x") == "page"
+    assert s.calls == 3
+
+
+def test_timeout_is_retried(no_sleep):
+    s = _Session([requests.Timeout("read timed out"), _Resp(200, "page")])
+    assert BaseScraper(session=s).fetch("http://x") == "page"
+
+
+def test_long_outage_still_fails_and_fails_closed(no_sleep):
+    err = requests.ConnectionError("Failed to resolve")
+    s = _Session([err, err, err, err])
+    with pytest.raises(requests.ConnectionError) as info:
+        BaseScraper(session=s).fetch("http://x")
+    assert is_end_of_pagination(info.value) is False
+    assert s.calls == 4
+
+
+def test_404_is_not_retried(no_sleep):
+    s = _Session([_Resp(404)])
+    with pytest.raises(requests.HTTPError):
+        BaseScraper(session=s).fetch("http://x")
+    assert s.calls == 1
+
+
+def test_503_then_network_error_then_success(no_sleep):
+    s = _Session([_Resp(503), requests.ConnectionError("reset"), _Resp(200, "ok")])
+    assert BaseScraper(session=s).fetch("http://x") == "ok"
