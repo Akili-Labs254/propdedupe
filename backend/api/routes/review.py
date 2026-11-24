@@ -1,4 +1,5 @@
 """Review queue endpoints: admin-only match review and resolution."""
+import hmac
 import os
 from typing import Optional
 from fastapi import APIRouter, Query, HTTPException, Header
@@ -11,7 +12,9 @@ ADMIN_KEY = os.getenv("ADMIN_API_KEY")
 
 def _require_admin(x_admin_key: Optional[str] = Header(None)):
     """Check the X-Admin-Key header matches the secret in .env."""
-    if not ADMIN_KEY or x_admin_key != ADMIN_KEY:
+    # Constant-time compare, same as the admin web pages (backend/web/admin.py).
+    if not ADMIN_KEY or not x_admin_key or not hmac.compare_digest(
+            x_admin_key, ADMIN_KEY):
         raise HTTPException(status_code=401, detail="Invalid or missing admin key")
 
 

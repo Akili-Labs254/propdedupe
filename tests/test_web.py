@@ -52,7 +52,10 @@ class FakeClient:
         def pop():
             queue = self._responses.get(name)
             assert queue, f"unexpected query on table '{name}'"
-            return queue.pop(0)
+            item = queue.pop(0)
+            if isinstance(item, Exception):   # e.g. PostgREST's PGRST103
+                raise item
+            return item
         return FakeQuery(pop)
 
     def rpc(self, *args, **kwargs):
@@ -735,3 +738,100 @@ def test_admin_batch_requires_key(client, monkeypatch):
     r = client.post("/admin/review/batch", data={"key": "wrong"},
                     follow_redirects=False)
     assert r.status_code == 401
+
+
+
+# ── 24 Nov 2026 review ─────────────────────────────────────────────────
+
+def _pgrst103():
+    from postgrest.exceptions import APIError
+    return APIError({"message": "Requested range not satisfiable",
+                     "code": "PGRST103", "hint": None, "details": ""})
+
+
+NO_TITLE_RENTAL = dict(PROP, title=None, category="rent", bedrooms=1,
+                       location="Westlands", slug="property-westlands-dbea7e",
+                       price=55300, price_min=55300, price_max=55300)
+
+
+def test_rent_page_without_a_title_never_says_none(client, monkeypatch):
+    """Live on 24 Nov: <title>None — Westlands | Fikia</title>, <h1>None</h1>."""
+    use_db(monkeypatch, {
+        "properties": [FakeResult([NO_TITLE_RENTAL])],
+        "listings": [FakeResult([{"source_id": 2, "url": "https://p24/x",
+                                  "title": None, "price": 55300,
+                                  "status": "active", "last_seen": "2026"}])],
+    })
+    r = client.get("/property/property-westlands-dbea7e")
+    assert r.status_code == 200
+    assert ">None<" not in r.text
+    assert "None —" not in r.text
+    assert "1 Bedroom Apartment to Rent" in r.text
+
+
+def test_card_without_a_title_never_says_none(client, monkeypatch):
+    use_db(monkeypatch, {"properties": [FakeResult([NO_TITLE_RENTAL], count=1)],
+                         "suburb_stats": [FakeResult([])]})
+    r = client.get("/?category=rent")
+    assert r.status_code == 200
+    assert "<h2>None</h2>" not in r.text
+    assert "1 Bedroom Apartment to Rent" in r.text
+
+
+def test_display_title_prefers_the_real_title():
+    assert web_routes.display_title(PROP) == "5 Bed Villa in Karen"
+    assert web_routes.display_title(dict(PROP, title="  ")) == "5 Bedroom House for Sale"
+    assert web_routes.display_title(dict(PROP, title=None, bedrooms=None)) == "House for Sale"
+
+
+def test_home_page_past_the_end_redirects(client, monkeypatch):
+    """Was a 500 on the live site (?page=99999)."""
+    use_db(monkeypatch, {"properties": [_pgrst103()]})
+    r = client.get("/?category=rent&page=99999", follow_redirects=False)
+    assert r.status_code == 302
+    assert "page=" not in r.headers["location"]
+    assert "category=rent" in r.headers["location"]
+
+
+def test_segment_page_past_the_end_redirects(client, monkeypatch):
+    """Was a 500 on the live site (/apartments-for-rent/south-b?page=5000)."""
+    use_db(monkeypatch, {"suburb_stats": [FakeResult([STATS])],
+                         "properties": [_pgrst103()]})
+    r = client.get("/houses-for-sale/kilimani?page=5000", follow_redirects=False)
+    assert r.status_code == 302
+    assert r.headers["location"].endswith("/houses-for-sale/kilimani")
+
+
+def test_other_database_errors_still_surface(client, monkeypatch):
+    from postgrest.exceptions import APIError
+    use_db(monkeypatch, {"properties": [APIError({"message": "boom", "code": "XX000",
+                                                  "hint": None, "details": ""})]})
+    assert client.get("/?page=2").status_code == 500
+
+
+def test_api_review_rejects_missing_and_wrong_keys(client, monkeypatch):
+    monkeypatch.setattr(api_review, "ADMIN_KEY", "s3cret")
+    use_db(monkeypatch, {})
+    # The queue listing is public by design; the writes are not.
+    for path in ("/review/1/merge", "/review/1/dismiss"):
+        assert client.post(path).status_code == 401
+        assert client.post(path, headers={"X-Admin-Key": "nope"}).status_code == 401
+        assert client.post(path, headers={"X-Admin-Key": ""}).status_code == 401
+
+
+
+def test_stats_reports_active_figures(client, monkeypatch):
+    """Was erroring live: count="exact" with no .limit(1) also pulled up
+    to 1,000 rows from each of three large tables."""
+    import backend.api.routes.stats as api_stats
+    db = FakeClient({
+        "listings": [FakeResult([], count=100000), FakeResult([], count=60000)],
+        "properties": [FakeResult([], count=65000), FakeResult([], count=40000)],
+        "matches": [FakeResult([], count=90000)],
+    })
+    monkeypatch.setattr(api_stats, "get_client", lambda: db)
+    body = client.get("/stats").json()
+    assert body["active_listings"] == 60000
+    assert body["active_properties"] == 40000
+    assert body["active_dedup_rate_pct"] == 33.3
+    assert body["dedup_rate_pct"] == 35.0

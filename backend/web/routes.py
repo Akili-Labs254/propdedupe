@@ -134,6 +134,45 @@ def days_listed(first_seen) -> Optional[int]:
 templates.env.filters["days_listed"] = days_listed
 
 
+def display_title(prop) -> str:
+    """A property's heading, never empty and never "None".
+
+    P24 rent tiles gave no usable title until 24 Nov 2026 (the parser read
+    the agency's schema.org name, or nothing), and Jinja renders a None as
+    the literal word: rent pages went out with "None" as their <title>,
+    H1 and social card. Build one from the facts when the title is missing.
+
+    No location in the fallback: the templates already add it ("— Kilimani"
+    in <title>, "in Kilimani." in the description, a line on the card).
+    """
+    title = (prop.get("title") or "").strip() if prop else ""
+    if title:
+        return title
+    rent = prop.get("category") == "rent" if prop else False
+    kind = "Apartment" if rent else "House"
+    beds = prop.get("bedrooms") if prop else None
+    return " ".join([f"{beds} Bedroom {kind}" if beds else kind,
+                     "to Rent" if rent else "for Sale"])
+
+
+templates.env.filters["display_title"] = display_title
+
+
+def past_the_end(exc: Exception) -> bool:
+    """PostgREST's answer to an offset beyond the last row (PGRST103).
+
+    Unhandled, any ?page= past the end was a 500: old links after the
+    inventory shrinks, crawlers probing ?page=5000.
+    """
+    return getattr(exc, "code", None) == "PGRST103"
+
+
+def first_page(request: Request) -> RedirectResponse:
+    """Same URL without ?page=, as a temporary redirect."""
+    return RedirectResponse(str(request.url.remove_query_params("page")),
+                            status_code=302)
+
+
 def _opt_int(value: Optional[str]) -> Optional[int]:
     """HTML forms submit empty fields as '': treat those (and junk)
     as 'no filter' instead of letting FastAPI 422 the whole request."""
@@ -270,10 +309,15 @@ def home(
         # properties that show no price at all. Someone who asked to sort
         # by price wants prices.
         q = q.not_.is_("price", "null")
-    result = (q.order(sort_col, desc=sort_desc)
-              .order("id", desc=True)  # tiebreak for same-crawl batches
-              .range(offset, offset + PER_PAGE - 1)
-              .execute())
+    try:
+        result = (q.order(sort_col, desc=sort_desc)
+                  .order("id", desc=True)  # tiebreak for same-crawl batches
+                  .range(offset, offset + PER_PAGE - 1)
+                  .execute())
+    except Exception as e:
+        if past_the_end(e):
+            return first_page(request)
+        raise
 
     total = result.count or 0
     total_pages = max(1, math.ceil(total / PER_PAGE))

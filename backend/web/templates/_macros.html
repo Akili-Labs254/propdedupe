@@ -1,12 +1,12 @@
 {% macro property_card(prop) %}
 <a class="card" href="/property/{{ prop.slug }}">
   {% if prop.image_url %}
-  <img src="{{ prop.image_url }}" alt="{{ prop.title }}" loading="lazy"
+  <img src="{{ prop.image_url }}" alt="{{ prop | display_title }}" loading="lazy"
        onerror="this.style.display='none'">
   {% endif %}
   <div class="card-body">
     <span class="price">{{ prop | price_range }}</span>
-    <h2>{{ prop.title }}</h2>
+    <h2>{{ prop | display_title }}</h2>
     <p class="meta">
       {%- set beds = prop | beds_range -%}
       {%- set baths = prop | baths_range -%}

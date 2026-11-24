@@ -24,8 +24,8 @@ from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 from backend.db.client import get_client
 from backend.dedup.adjacency import ADJACENCY
 from backend.web.routes import (  # shared env + filters + sort options
-    DEFAULT_SORT, SORTS, apply_sale_price_floor, suburb_from_slug,
-    suburb_slug, templates,
+    DEFAULT_SORT, SORTS, apply_sale_price_floor, first_page, past_the_end,
+    suburb_from_slug, suburb_slug, templates,
 )
 
 router = APIRouter(include_in_schema=False)
@@ -232,7 +232,12 @@ def _segment_page(request: Request, suburb: str, category: str,
     # links, so nothing new gets discovered through us.
     thin = stats["property_count"] < MIN_SEGMENT
 
-    result = fetch_properties(db, suburb, category, bedrooms, page, sort)
+    try:
+        result = fetch_properties(db, suburb, category, bedrooms, page, sort)
+    except Exception as e:
+        if past_the_end(e):
+            return first_page(request)
+        raise
     total = result.count or 0
     total_pages = max(1, math.ceil(total / PER_PAGE))
 
