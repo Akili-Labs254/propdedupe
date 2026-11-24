@@ -9,6 +9,8 @@ Run: pytest tests/test_save.py
 """
 from types import SimpleNamespace
 
+import pytest
+
 import backend.db.save as save_mod
 from backend.db.save import (compute_cluster_key, sane_price, sane_size,
                              save_listings)
@@ -157,8 +159,11 @@ def run_save(monkeypatch, incoming, stored, category):
     sink = []
     monkeypatch.setattr(save_mod, "get_client", lambda: SimpleNamespace(
         table=lambda name: FakeTable(sink)))
-    monkeypatch.setattr(save_mod, "_existing_categories",
-                        lambda db, sid, ids: stored)
+    # `stored` maps id -> category (str) or -> a full stored row (dict).
+    rows = {k: (v if isinstance(v, dict) else {"category": v})
+            for k, v in stored.items()}
+    monkeypatch.setattr(save_mod, "_existing_rows",
+                        lambda db, sid, ids: rows)
     save_listings(incoming, source_id=2, category=category)
     return sink
 
@@ -192,3 +197,137 @@ def test_junk_price_still_nulled_through_save(monkeypatch):
     rows = run_save(monkeypatch, [scrapable("555", price=2.0)],
                     stored={}, category="rent")
     assert rows[0]["price"] is None
+
+
+# ── a parser that misses a field must not erase it ────────────────────
+#
+# Both P24 incidents were one selector silently matching nothing: prices
+# in August (37,000 NULLed), cover images in November (26,008 image URLs
+# NULLed, and their hashes with them). Nothing failed; the upsert simply
+# wrote NULL over what was stored.
+
+IMG = "https://images.prop24.com/abc/Crop600x400"
+
+
+def stored_row(**kw):
+    base = dict(category="rent", url="http://p24/x", title="2 Bedroom Flat",
+                location="Westlands", address="Westlands, Nairobi",
+                image_url=IMG, bedrooms=2, baths=2.0, size_sqm=100.0,
+                price=85000.0)
+    base.update(kw)
+    return base
+
+
+def test_missing_image_keeps_the_stored_one(monkeypatch):
+    rows = run_save(monkeypatch, [scrapable("1", image_urls=[])],
+                    stored={"1": stored_row()}, category="rent")
+    assert rows[0]["image_url"] == IMG
+
+
+def test_missing_title_keeps_the_stored_one(monkeypatch):
+    rows = run_save(monkeypatch, [scrapable("1", title=None)],
+                    stored={"1": stored_row(title="Kept")}, category="rent")
+    assert rows[0]["title"] == "Kept"
+
+
+def test_new_value_still_replaces_the_stored_one(monkeypatch):
+    rows = run_save(monkeypatch,
+                    [scrapable("1", title="New title", image_urls=["http://new"])],
+                    stored={"1": stored_row()}, category="rent")
+    assert rows[0]["title"] == "New title"
+    assert rows[0]["image_url"] == "http://new"
+
+
+def test_cluster_key_uses_the_kept_image(monkeypatch):
+    """The key must describe the stored row, including a kept image."""
+    rows = run_save(monkeypatch, [scrapable("1", image_urls=[])],
+                    stored={"1": stored_row()}, category="rent")
+    assert rows[0]["cluster_key"] is not None
+
+
+def test_one_listing_losing_its_price_is_allowed(monkeypatch):
+    """An advert can genuinely go to Price on Application."""
+    incoming = [scrapable(str(i), image_urls=[IMG]) for i in range(10)]
+    incoming[0].price = None
+    stored = {str(i): stored_row() for i in range(10)}
+    rows = run_save(monkeypatch, incoming, stored=stored, category="rent")
+    assert len(rows) == 10
+    assert rows[0]["price"] is None
+
+
+@pytest.mark.parametrize("field,attr,empty", [
+    ("price", "price", None),
+    ("image_url", "image_urls", []),
+    ("title", "title", None),
+    ("location", "location", None),
+])
+def test_page_wide_collapse_raises_before_writing(monkeypatch, field, attr, empty):
+    incoming = [scrapable(str(i), image_urls=[IMG]) for i in range(20)]
+    for l in incoming:
+        setattr(l, attr, empty)
+    stored = {str(i): stored_row() for i in range(20)}
+    with pytest.raises(save_mod.FieldCollapse, match=field):
+        run_save(monkeypatch, incoming, stored=stored, category="rent")
+
+
+def test_collapse_needs_enough_stored_rows(monkeypatch):
+    """Two listings is not enough evidence of a broken parser."""
+    incoming = [scrapable("1", price=None, image_urls=[IMG]),
+                scrapable("2", price=None, image_urls=[IMG])]
+    stored = {"1": stored_row(), "2": stored_row()}
+    rows = run_save(monkeypatch, incoming, stored=stored, category="rent")
+    assert len(rows) == 2
+
+
+def test_new_listings_are_not_judged_for_collapse(monkeypatch):
+    """Nothing stored means nothing to lose; the parser-level guard
+    (check_field_coverage) covers all-new pages."""
+    incoming = [scrapable(str(i), price=None) for i in range(20)]
+    rows = run_save(monkeypatch, incoming, stored={}, category="rent")
+    assert len(rows) == 20
+
+
+def test_collapse_is_a_parser_error():
+    """The scrape loop and refresh treat it like any broken parser."""
+    from backend.scraper.base import ParserOutOfDate
+    assert issubclass(save_mod.FieldCollapse, ParserOutOfDate)
+
+
+# ── batch hygiene ──────────────────────────────────────────────────────
+
+def test_listing_without_an_id_is_skipped(monkeypatch):
+    """source_listing_id is NOT NULL; one bad row would fail the batch."""
+    rows = run_save(monkeypatch, [scrapable(None), scrapable("2")],
+                    stored={}, category="rent")
+    assert [r["source_listing_id"] for r in rows] == ["2"]
+
+
+def test_duplicate_ids_in_one_page_are_collapsed(monkeypatch):
+    """Postgres refuses an upsert that touches one row twice."""
+    rows = run_save(monkeypatch,
+                    [scrapable("7", price=90000.0), scrapable("7", price=95000.0)],
+                    stored={}, category="rent")
+    assert len(rows) == 1
+    assert rows[0]["price"] == 95000.0
+
+
+# ── no image, no exact-duplicate key ───────────────────────────────────
+
+def test_no_image_means_no_cluster_key():
+    """Without the shared image the key is just beds/baths/price, shared
+    by thousands of unrelated flats. Step 2 would merge them all."""
+    assert compute_cluster_key(listing(image_urls=[])) is None
+
+
+def test_no_image_listing_saves_with_no_key(monkeypatch):
+    rows = run_save(monkeypatch, [scrapable("9", image_urls=[])],
+                    stored={}, category="rent")
+    assert rows[0]["cluster_key"] is None
+
+
+def test_size_is_not_sticky(monkeypatch):
+    """The parser returns no size on purpose for acres and junk figures;
+    keeping the stored value would preserve an old misparse forever."""
+    rows = run_save(monkeypatch, [scrapable("1", size_sqm=None, image_urls=[IMG])],
+                    stored={"1": stored_row(size_sqm=102.0)}, category="rent")
+    assert rows[0]["size_sqm"] is None
