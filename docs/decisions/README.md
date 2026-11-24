@@ -15,6 +15,7 @@ order if you want the full history. (0004 was accidentally used twice, hence
 | [0005](0005-intra-source-dedup-measured-threshold.md) | Same-site auto-merge threshold from a hand audit |
 | [0006](0006-rentals-category-expansion.md) | Rentals as a separate category |
 | [0007](0007-overrides-may-not-cross-invariants.md) | Manual overrides can't break invariants |
-| [0008](0008-staleness-requires-a-completed-crawl.md) | Only a completed crawl can mark listings stale |
+| [0008](0008-staleness-requires-a-completed-crawl.md) | Only a completed crawl can mark listings stale (amended Aug, Sep, Nov) |
 | [0009](0009-development-listings-collapse-to-one-property.md) | A development's identical units show as one property |
 | [0010](0010-sources-can-close-and-listings-expire-unverified.md) | When a source blocks us: don't circumvent, expire listings gradually |
+| [0011](0011-a-scrape-may-not-erase-what-it-fails-to-read.md) | A parser that misses a field must not erase it; the rebuild checks its inputs first |

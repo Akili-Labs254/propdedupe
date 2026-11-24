@@ -115,6 +115,26 @@ did. The scheduled GitHub workflow can no longer scrape either source, so
 the automation this project relied on is gone until it runs from a
 residential IP. That is a separate problem from this ADR, and a bigger one.
 
+### Amended 2026-11-24: resume mode has no completeness record
+
+The completeness guard reads the scraper's own `complete` flag. A run that
+dies after scraping is resumed with `--stale --stale-cutoff`, which runs in
+a separate process with no scrape results, so there is no flag to read and
+the guard was skipped for **every** category.
+
+On 24 Nov a P24 run lost its network at rent page 861. Rent is capped at
+1,500 of ~4,300 pages anyway, so it never completes. The resume command
+written for it, `--stale --sources p24 --stale-cutoff ...`, would have
+staled every rental the crawl did not reach: about 30,000 live listings. It
+was caught before it ran.
+
+Resume mode now also requires `--categories`, naming only the categories
+whose crawl logged `complete=True` in the run being resumed. Rent is capped
+by default, so the answer is almost always `sale`. Same reasoning as the
+`--sources` requirement added on 4 Nov after a resume staled 12,000 BRK
+listings: a resume cannot know what the original run covered, so the
+operator has to say it.
+
 ## Consequences
 
 - A capped category never stales. Dead rentals accumulate until a crawl

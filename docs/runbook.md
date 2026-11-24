@@ -60,8 +60,17 @@ Before step 3, check DB size (Supabase dashboard, or
 rebuild needs headroom; above ~420 MB of 500, trim first.
 
 If a run dies after scraping, resume with `--hashes`, then
-`--stale --sources <what that run scraped> --stale-cutoff "<'Run started'
-line from that log>"`. Never a bare `--stale` (see below).
+`--stale --sources <what that run scraped> --categories <what COMPLETED>
+--stale-cutoff "<'Run started' line from that log>"`. Check the log for
+`complete=True`: rent is capped and never completes, so `--categories` is
+almost always `sale`. Never a bare `--stale` (see below); the script now
+refuses one without `--sources` and `--categories`.
+
+The rebuild checks its inputs before clearing anything and refuses to
+start if more than 5% of active listings have no image or no hash, or
+more than 10% have no price. "ABORTED before clearing anything" means the
+live site is untouched: finish `--hashes`, or find the parser problem.
+`--force` overrides it, only when you know why the numbers look wrong.
 
 ## Regular operations
 
@@ -188,6 +197,23 @@ but a local `.env` copied from an old `.env.example` still set both, and
 placeholder contact at a 2s delay until November. When changing a
 default, check `.env` too, or print `config.USER_AGENT` before a run.
 
+**`FieldCollapse` / `ParserOutOfDate` during a P24 scrape**: the source
+markup changed and a field stopped parsing. Two layers catch it before
+anything is written: a page where no listing has an image or a price
+(`check_field_coverage`), and a page where at least 25% of listings
+already in the DB come back without a field they had (`save.py`). The
+category stops and is marked crashed (never complete, so no stale pass,
+and `--all` skips the rebuild). Fix the selector in `property24.py`, add
+a test from a real tile (`tests/test_p24_fields.py`), rescrape. Isolated
+missing fields don't stop a run: url, title, location, address, image,
+beds and baths keep their stored value rather than going NULL.
+History: prices NULLed in August (37k), images in November (26k).
+
+**Hash stage stopped: "transient failures in a row"**: the network
+dropped. Images that failed transiently are left unhashed, not marked
+gone; rerun `--hashes`. Only 404/403 or an unreadable file marks an
+image unfetchable (`image_phash = ''`), which is permanent.
+
 **Resuming a crashed run's --stale stage**: NEVER bare `--stale`: the
 cutoff defaults to the new invocation's start time and mass-stales
 everything scraped before it. Pass the original run's timestamp:
@@ -210,7 +236,8 @@ active BRK listings, because BRK hadn't been scraped since 2 Sep.
 - `persist_dedup` clears before it rebuilds, so the site serves nothing
   while it runs and stays empty if it crashes. Build-then-swap would fix
   this; not done yet.
-- No per-field fill-rate check after a scrape. A parser that half-breaks
-  (prices NULL, location swallowing headline text) currently only shows
-  up when someone looks at the site.
+- Field checks are per page only. P24 pages where every listing lacks a
+  cover image or a price now raise `ParserOutOfDate` before saving
+  (`check_field_coverage`, added after the 24 Nov image incident). There
+  is still no run-level fill-rate report, and BRK has no equivalent.
 - ADR 0009 (collapse development listings) is decided but not built.

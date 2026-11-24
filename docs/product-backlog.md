@@ -23,6 +23,21 @@ Rough order within each section = leverage per unit of effort.
   equity. TTL-cached slug→suburb fallback covers punctuated names that a
   plain space-swap can't reverse.
 
+- **A scrape can no longer erase what it fails to read** (Nov 2026,
+  ADR 0011): sticky fields, page-wide field-collapse check before any
+  write, no `cluster_key` without an image, and an input check before the
+  rebuild clears anything. Came out of the 24 Nov image-parser break.
+
+- **Rent titles** (Nov 2026): rentals were titled with the agency's name
+  or nothing, and pages rendered "None". Parser reads the tile link title;
+  `display_title` fallback in templates; stored rows repaired by
+  `backend/db/p24_rent_title_repair.sql`.
+
+- **Past-the-end `?page=` no longer 500s** (Nov 2026): redirects to page 1.
+
+- **`/stats` fixed** (Nov 2026): it pulled rows it only needed to count;
+  now also reports the active figures (the ones to quote publicly).
+
 ## Bugs
 
 - **HEAD requests return 405**: FastAPI's `APIRoute` doesn't auto-add
@@ -30,6 +45,24 @@ Rough order within each section = leverage per unit of effort.
   page 405s on HEAD. Googlebot uses GET so this isn't an SEO issue, but
   uptime monitors and link-checkers will read the site as down. Fix:
   `methods=["GET", "HEAD"]` on the consumer route decorators.
+
+- **The rebuild empties the site while it runs** (build-then-swap):
+  `persist_dedup` clears properties/matches first, so property pages 404
+  for the ~90 minutes it takes and stay empty if it crashes. ADR 0011's
+  input check makes a bad rebuild less likely, not harmless. Fix: build
+  into new tables and swap.
+
+- **No run-level fill-rate report**: the page checks (ADR 0011) catch a
+  field vanishing across a page, but a slow drift (a field going from 95%
+  to 60% filled) still only shows up by looking. Record per-field fill
+  rates per source/category after each scrape and compare with the last.
+
+- **BRK has no field-coverage check**: the P24 guards don't cover it.
+  Moot while BuyRentKenya blocks us (ADR 0010); needed before re-enabling.
+
+- **Homepage runs two exact counts per request** (the "X adverts → Y
+  properties" strip): fine at current traffic, a cost on the free tier if
+  it grows. Cache for a few minutes.
 
 ## Search & filters
 
@@ -140,7 +173,9 @@ answer to trust is evidence from data, not verification of reality.
 
 ## Dedup
 
-- **Do development units collapse into one property?**: 96 phash
+- **Do development units collapse into one property?** Decided: yes
+  (ADR 0009), with the size threshold applied when edges are created.
+  Not implemented yet. Original note: 96 phash
   groups hold 4,183 active listings: e.g. 212 properties, all 4-bed,
   all 13–20M, across Kileleshwa/Kilimani/Lavington. One development's
   render on individually-listed units. The scorer can't auto-merge them

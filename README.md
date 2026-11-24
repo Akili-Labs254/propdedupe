@@ -22,7 +22,7 @@ From the last full crawl (6 September 2026):
 
 - **57,744** live adverts become **35,791** distinct results
 - **718** properties were found on both portals
-- 174 tests
+- 262 tests
 
 Not all of that gap is "duplicates". Some of it is the same advert posted
 many times, and some is a development advertising every identical unit
@@ -70,9 +70,14 @@ Most of what I learnt came from these:
 - **Supabase's 60 second gateway limit.** Big single UPDATE/DELETE requests
   just timed out, and retrying made it worse (lock conflicts). Every bulk
   write is now done in batches of 1,000 rows.
-- **Silent parser breakage.** Property24 changed its markup and prices came
-  back NULL for eleven days without anything failing. I only noticed
-  because a page looked empty.
+- **Silent parser breakage, twice.** Property24 changed its markup and
+  prices came back NULL for eleven days without anything failing. I only
+  noticed because a page looked empty. In November the same thing happened
+  to the photos: 26,000 listings lost their image in one run. Both times
+  every listing still parsed, so the save step just wrote NULL over good
+  data. Now a missed field keeps its stored value, a page where a field
+  vanishes stops the run before anything is written, and the rebuild
+  checks its inputs before it clears anything (ADR 0011).
 
 ## Current state
 
@@ -80,8 +85,8 @@ Most of what I learnt came from these:
   connection rather than on a schedule. See `docs/runbook.md`.
 - The rebuild clears tables before refilling them, so the site is empty
   while it runs. Building into new tables and swapping is next.
-- A check on per-field fill rates after each scrape would have caught the
-  NULL prices. Also not built yet.
+- The field checks work per page. A report comparing fill rates run to
+  run, which would catch a slow drift, isn't built yet.
 
 ## Stack
 
