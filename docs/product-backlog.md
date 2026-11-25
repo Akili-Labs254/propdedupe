@@ -52,6 +52,15 @@ Rough order within each section = leverage per unit of effort.
   input check makes a bad rebuild less likely, not harmless. Fix: build
   into new tables and swap.
 
+- **ADR 0010's 90-day verification horizon isn't built**: the ADR
+  decides that a listing not re-checked in 90 days is withheld from
+  listing pages (status, row and slug untouched; property pages keep
+  resolving), and that cards say when a listing was last checked. Neither
+  exists. The 12,252 BuyRentKenya listings were last checked on 2 Sep and
+  pass 90 days on 1 Dec. Needs `properties.last_seen` (max over members,
+  written by all three persist steps + a backfill SQL, per the standing
+  rule), a filter on the home and segment queries, and the card label.
+
 - **No run-level fill-rate report**: the page checks (ADR 0011) catch a
   field vanishing across a page, but a slow drift (a field going from 95%
   to 60% filled) still only shows up by looking. Record per-field fill

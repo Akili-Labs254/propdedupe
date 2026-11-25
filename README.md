@@ -18,11 +18,16 @@ property.
 
 ## Numbers
 
-From the last full crawl (6 September 2026):
+After the Property24 crawl of 24-25 November 2026:
 
-- **57,744** live adverts become **35,791** distinct results
-- **718** properties were found on both portals
+- **68,840** active adverts become **41,271** distinct results
+- **752** properties were found on both portals
 - 262 tests
+
+12,252 of those adverts are BuyRentKenya listings last checked on
+2 September, when it blocked the scraper (ADR 0010). That ADR decides they
+leave the listing pages 90 days after their last check, which isn't built
+yet. Rentals are the first 1,500 pages of Property24's ~4,300.
 
 Not all of that gap is "duplicates". Some of it is the same advert posted
 many times, and some is a development advertising every identical unit
